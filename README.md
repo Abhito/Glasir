@@ -46,10 +46,16 @@ To remove Glasir, delete its folder.
 generation, DLSS 5, sound and the window mode; every key is explained in the
 file. The card's own audio input is found automatically. DLSS 5 turns itself
 on with an NVIDIA RTX 50 series GPU (`[dlss5] enabled = auto`). Volume, boost
-and audio delay you change while playing are kept in `glasir.ini`.
+and audio delay you change while playing are kept in `glasir.ini`, and so is
+what you change in the menu.
+
+The menu (`Tab`) is drawn after DLSS 5 and frame generation, on every frame
+that reaches the screen, so it stays sharp and answers at once. Keys and the
+mouse go to it while it is open.
 
 | Key | |
 |---|---|
+| `Tab` | the menu: DLSS 5, frame generation, sound, full screen, SDR/HDR (`Esc` or `Tab` closes it) |
 | double-click, `f` | full screen |
 | `Up` / `Down`, mouse wheel | volume |
 | `m` | mute |

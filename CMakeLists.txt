@@ -37,8 +37,36 @@ target_include_directories(glasir_reshade_api SYSTEM INTERFACE third_party/resha
 add_library(glasir_mpv_client INTERFACE)
 target_include_directories(glasir_mpv_client SYSTEM INTERFACE third_party/mpv/include)
 
+# fxc from the Windows SDK the build uses (shaders of the add-ons).
+set(_sdk_bin "C:/Program Files (x86)/Windows Kits/10/bin")
+file(GLOB _sdk_versions LIST_DIRECTORIES true "${_sdk_bin}/10.*")
+list(SORT _sdk_versions ORDER DESCENDING)
+set(_fxc_hints "${_sdk_bin}/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}/x64")
+foreach(_v IN LISTS _sdk_versions)
+    list(APPEND _fxc_hints "${_v}/x64")
+endforeach()
+find_program(GLASIR_FXC fxc HINTS ${_fxc_hints} REQUIRED)
+
+# Dear ImGui (third_party/imgui, MIT): the in-game menu and the launcher.
+# Built as it comes (its own warning level).
+add_library(glasir_imgui STATIC
+    third_party/imgui/imgui.cpp
+    third_party/imgui/imgui_draw.cpp
+    third_party/imgui/imgui_tables.cpp
+    third_party/imgui/imgui_widgets.cpp
+    third_party/imgui/backends/imgui_impl_dx11.cpp
+    third_party/imgui/backends/imgui_impl_win32.cpp)
+target_include_directories(glasir_imgui SYSTEM PUBLIC third_party/imgui third_party/imgui/backends)
+target_compile_definitions(glasir_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS UNICODE)
+target_link_libraries(glasir_imgui PUBLIC d3d11 d3dcompiler dwmapi)
+
+# Code shared by Glasir.exe and the add-ons (src/common).
+add_library(glasir_common STATIC src/common/ini_edit.cpp src/common/json.cpp)
+glasir_component(glasir_common)
+target_include_directories(glasir_common PUBLIC src/common)
+
 # Components are added as they are ported (docs/PLAN.md, "Porting order").
-foreach(component IN ITEMS capture app audio framegen)
+foreach(component IN ITEMS capture app audio overlay framegen)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${component}/CMakeLists.txt")
         add_subdirectory(src/${component})
     endif()

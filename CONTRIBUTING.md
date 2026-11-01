@@ -52,7 +52,8 @@ console).
 ```
 src/capture/    finding cards, reading frames, dedup (library)  MIT
 src/app/        Glasir.exe: settings, starting mpv, frame pump  MIT
-src/common/     shared with the add-ons (frame gen link)        MIT
+src/common/     shared with the add-ons (link, INI, JSON)       MIT
+src/overlay/    in-game menu, built into the frame gen add-on   MIT
 src/audio/      WASAPI audio mpv plugin                        MIT
 src/framegen/   frame generation ReShade add-on + shaders      MPL-2.0
 tools/          developer scripts (fetch mpv, smoke tests)     MIT

@@ -638,13 +638,22 @@ void keep_changes(const MpvWatch &watch, const std::wstring &settings_path) {
     if (!values.empty()) save_settings(settings_path, values);
 }
 
+// mpv's exit code when the in-game menu asks Glasir to start the picture
+// again (after it changed glasir.ini, e.g. SDR to HDR).
+constexpr DWORD kRestartCode = 42;
+
 // Plays until mpv closes. Returns the exit code; errors go to report().
-// Sets stuck if the capture thread would not end (see wWinMain).
-int run(const Args &args, bool &stuck) {
+// Sets stuck if the capture thread would not end (see wWinMain), restart if
+// the menu asked to start again (again: this is such a start).
+int run(const Args &args, bool again, bool &stuck, bool &restart) {
     const std::wstring dir = app_dir();
-    CreateDirectoryW((dir + L"\\logs").c_str(), nullptr);
-    log_open(dir + L"\\logs\\glasir.log");
-    log(L"{} {} ({})", widen(GLASIR_NAME), widen(GLASIR_VERSION), widen(GLASIR_GIT_DESCRIBE));
+    if (!again) {
+        CreateDirectoryW((dir + L"\\logs").c_str(), nullptr);
+        log_open(dir + L"\\logs\\glasir.log");
+        log(L"{} {} ({})", widen(GLASIR_NAME), widen(GLASIR_VERSION), widen(GLASIR_GIT_DESCRIBE));
+    } else {
+        log(L"starting again, as the menu asked");
+    }
 
     // One Glasir at a time, before anything is read or written: one still
     // closing writes glasir.ini and ReShade.ini as it goes, and setup may
@@ -697,16 +706,16 @@ int run(const Args &args, bool &stuck) {
         // DLSS 5: auto runs it on an RTX 50 GPU; on tries any GPU.
         const GpuInfo gpu = display_gpu();
         const bool installed = dlss5_installed(engine);
-        const bool dlss5 = installed && (s.dlss5 == Settings::Dlss5::On ||
-                                         (s.dlss5 == Settings::Dlss5::Auto && is_rtx50(gpu)));
-        write_reshade_config(engine, s, dlss5);
+        const bool loaded = installed && (s.dlss5 == Settings::Dlss5::On || is_rtx50(gpu));
+        const bool dlss5 = loaded && s.dlss5 != Settings::Dlss5::Off;
+        write_reshade_config(engine, s, loaded, dlss5);
         log(L"ReShade: on; frame generation {}{}", s.framegen ? L"on" : L"off",
             s.framegen && !s.dedup ? L" but needs dedup = 1: it stays off" : L"");
         std::wstring why;
         if (!installed)
             why = L" (not downloaded; \"Glasir.exe --setup\" offers it)";
-        else if (s.dlss5 == Settings::Dlss5::Off)
-            why = L" (glasir.ini)";
+        else if (loaded && !dlss5)
+            why = L" (glasir.ini; the menu can switch it on)";
         else if (!dlss5)
             why = L" (needs an RTX 50 series GPU; [dlss5] enabled = on tries anyway)";
         log(L"DLSS 5: {}{}; GPU: {}", dlss5 ? L"on" : L"off", why, gpu.found ? gpu.name : L"unknown");
@@ -726,6 +735,9 @@ int run(const Args &args, bool &stuck) {
     plan.audio_log = dir + L"\\logs\\audio.log";
     if (s.audio) choose_audio(s, src, plan);
 
+    // The in-game menu keeps what it changes in the same file.
+    SetEnvironmentVariableW(L"GLASIR_SETTINGS", settings_path.c_str());
+    SetEnvironmentVariableW(L"GLASIR_VIDEO_MODE", s.hdr ? L"hdr" : L"sdr");
     MpvProcess mpv;
     if (!mpv.start(join_command_line(plan.mpv_exe, mpv_arguments(plan, s)), plan.raw, error)) {
         report(error);
@@ -890,6 +902,7 @@ int run(const Args &args, bool &stuck) {
     log(L"mpv exited (code {})", mpv.exit_code());
     changes.stop();
     keep_changes(changes, settings_path);
+    restart = mpv.exit_code() == kRestartCode && rc == 0;
     return rc;
 }
 
@@ -922,7 +935,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (args.list)
         print(device_list_text(), args.dialogs);
     else
-        rc = run(args, stuck);
+        for (bool again = false, restart = true; restart && !stuck; again = true) {
+            restart = false;
+            rc = run(args, again, stuck, restart);
+        }
     if (!g_error.empty()) {
         if (args.dialogs) show(g_error, MB_ICONERROR);
         else print(L"Glasir: " + g_error + L"\n", false);  // to a console or pipe, if there is one

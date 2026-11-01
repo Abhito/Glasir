@@ -477,17 +477,19 @@ extern "C" MPV_EXPORT int mpv_open_cplugin(mpv_handle *mpv) {
             auto *message = static_cast<mpv_event_client_message *>(event->data);
             const char *what = message->num_args > 0 ? message->args[0] : "";
             const char *arg = message->num_args > 1 ? message->args[1] : nullptr;
+            // "quiet": from the in-game menu, which shows the value itself.
+            const bool quiet = message->num_args > 2 && !strcmp(message->args[2], "quiet");
             if (!strcmp(what, "glasir-audio-delay")) {
                 delay = std::clamp(adjust(delay, arg), 0, kMaxDelayMs);
                 engine.delay_ms = delay;
                 publish(mpv, "user-data/glasir/audio-delay", std::to_string(delay));
-                show(mpv, std::format("Audio delay: {} ms", delay));
+                if (!quiet) show(mpv, std::format("Audio delay: {} ms", delay));
                 log(std::format("audio delay {} ms", delay));
             } else if (!strcmp(what, "glasir-audio-boost")) {
                 boost = std::clamp(adjust(boost, arg), 100, 400);
                 update_gain();
                 publish(mpv, "user-data/glasir/audio-boost", std::to_string(boost));
-                show(mpv, std::format("Audio boost: {}%", boost));
+                if (!quiet) show(mpv, std::format("Audio boost: {}%", boost));
                 log(std::format("audio boost {}%", boost));
             } else if (!strcmp(what, "glasir-audio-restart") && !device.empty()) {
                 show(mpv, "Audio: restarting");

@@ -4,15 +4,7 @@
 
 include(shaders.cmake)
 
-# fxc from the Windows SDK the build uses.
-set(_sdk_bin "C:/Program Files (x86)/Windows Kits/10/bin")
-file(GLOB _sdk_versions LIST_DIRECTORIES true "${_sdk_bin}/10.*")
-list(SORT _sdk_versions ORDER DESCENDING)
-set(_fxc_hints "${_sdk_bin}/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}/x64")
-foreach(_v IN LISTS _sdk_versions)
-    list(APPEND _fxc_hints "${_v}/x64")
-endforeach()
-find_program(GLASIR_FXC fxc HINTS ${_fxc_hints} REQUIRED)
+# fxc (GLASIR_FXC) is found by the root CMakeLists.txt.
 
 set(_shader_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${_shader_dir}")
@@ -49,7 +41,7 @@ add_library(glasir_framegen SHARED glasir_framegen.cpp)
 set_target_properties(glasir_framegen PROPERTIES OUTPUT_NAME "zz-glasir-framegen" SUFFIX ".addon64")
 glasir_component(glasir_framegen)
 target_include_directories(glasir_framegen PRIVATE "${PROJECT_SOURCE_DIR}/src/common")
-target_link_libraries(glasir_framegen PRIVATE glasir_framegen_interp glasir_reshade_api
+target_link_libraries(glasir_framegen PRIVATE glasir_framegen_interp glasir_reshade_api glasir_overlay
     d3d11 dxgi user32 ole32 windowscodecs)
 install(TARGETS glasir_framegen RUNTIME DESTINATION engine)
 

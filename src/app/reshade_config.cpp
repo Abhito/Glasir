@@ -85,7 +85,7 @@ bool reshade_installed(const std::wstring &engine_dir) { return exists(engine_di
 
 bool dlss5_installed(const std::wstring &engine_dir) { return component_installed(engine_dir, Component::Dlss5); }
 
-void write_reshade_config(const std::wstring &engine_dir, const Settings &s, bool dlss5) {
+void write_reshade_config(const std::wstring &engine_dir, const Settings &s, bool dlss5_loaded, bool dlss5_on) {
     const std::wstring ini = engine_dir + L"\\ReShade.ini";
     // ReShade's own defaults that do not suit a player: its first-run
     // tutorial banner, and debug information in compiled effects.
@@ -109,16 +109,17 @@ void write_reshade_config(const std::wstring &engine_dir, const Settings &s, boo
                 L".\\reshade-shaders\\Textures\\**");
     put_in_list(ini, L"GENERAL", L"PreprocessorDefinitions", L"DLSS5_MV_PROVIDER=", L"DLSS5_MV_PROVIDER=3");
     put_default(ini, L"GENERAL", L"PresetPath", L".\\ReShadePreset.ini");
-    // On every start, as glasir.ini says (RenoDX's own key, F6, toggles it for
-    // the session).
-    put(ini, L"RenoDX.DLSS5", L"NeuralUplift", dlss5 ? L"1" : L"0");
+    // On every start: RenoDX and the Feeder work whenever DLSS 5 is loaded;
+    // whether it shows is the effects' state (the menu switches them; RenoDX's
+    // own key, F6, toggles its part for the session).
+    put(ini, L"RenoDX.DLSS5", L"NeuralUplift", dlss5_loaded ? L"1" : L"0");
     const std::wstring preset = engine_dir + L"\\ReShadePreset.ini";
-    put_plain(preset, "Techniques", dlss5 ? kDlss5Techniques : "");
+    put_plain(preset, "Techniques", dlss5_loaded && dlss5_on ? kDlss5Techniques : "");
     put_plain(preset, "TechniqueSorting", kDlss5Techniques);
     // The Feeder writes its file with working defaults on its first start;
     // Glasir only switches it (and makes one only to keep it off).
     const std::wstring feeder = engine_dir + L"\\dlss5-feed.cfg";
-    if (exists(feeder) || !dlss5) put_plain(feeder, "enabled", dlss5 ? "1" : "0");
+    if (exists(feeder) || !dlss5_loaded) put_plain(feeder, "enabled", dlss5_loaded ? "1" : "0");
 }
 
 }  // namespace glasir

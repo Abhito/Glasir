@@ -37,7 +37,8 @@ public:
         const bool wanted = link_ && link_->send_repeats != 0;
         if (wanted != repeats_wanted_) {
             repeats_wanted_ = wanted;
-            log(L"{}", wanted ? L"frame generation off: repeats are sent too" : L"frame generation on: new frames only");
+            log(L"{}", wanted ? L"repeats are sent too (frame generation off, or the menu open on a still picture)"
+                       : L"new frames only");
         }
         return wanted;
     }

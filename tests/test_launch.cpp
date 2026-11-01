@@ -250,7 +250,7 @@ int main() {
                                  L"\\nvngx_dlss.dll", L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
             touch(f, "x");
         expect(dlss5_installed(engine), "DLSS 5 files there: installed");
-        write_reshade_config(engine, s, true);
+        write_reshade_config(engine, s, true, true);
         std::string ini = read(L"\\ReShade.ini");
         expect(ini.find(".\\reshade-shaders\\Shaders\\**,.\\,D:\\MyShaders\\**") != std::string::npos,
                "effect path added in front, the user's kept");
@@ -265,7 +265,12 @@ int main() {
         expect(read(L"\\dlss5-feed.cfg").empty(), "DLSS 5 on: the Feeder's file is left for the Feeder to write");
         touch(L"\\dlss5-feed.cfg", "enabled=1\r\nmode=2\r\n");
         touch(L"\\ReShadePreset.ini", "Techniques=X@x.fx\r\nTechniqueSorting=X@x.fx\r\n\r\n[x.fx]\r\nA=1\r\n");
-        write_reshade_config(engine, s, false);
+        write_reshade_config(engine, s, true, false);
+        expect(read(L"\\ReShadePreset.ini").rfind("Techniques=\r\n", 0) == 0 &&
+                   read(L"\\ReShade.ini").find("NeuralUplift=1") != std::string::npos &&
+                   read(L"\\dlss5-feed.cfg") == "enabled=1\r\nmode=2\r\n",
+               "DLSS 5 loaded but off: no effects, add-ons ready for the menu");
+        write_reshade_config(engine, s, false, false);
         expect(read(L"\\ReShade.ini").find("NeuralUplift=0") != std::string::npos, "DLSS 5 off: NeuralUplift=0");
         expect(read(L"\\dlss5-feed.cfg") == "enabled=0\r\nmode=2\r\n", "DLSS 5 off: Feeder off, its other keys kept");
         const std::string preset = read(L"\\ReShadePreset.ini");

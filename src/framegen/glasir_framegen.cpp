@@ -49,6 +49,7 @@
 
 #include "fg_interp.h"
 #include "framegen_link.h"
+#include "overlay.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -1152,6 +1153,15 @@ class FrameGen {
 public:
     void on_reshade_present(reshade::api::effect_runtime *runtime);
     void on_finish_present(reshade::api::swapchain *swapchain);
+    // For the in-game menu (src/overlay), on mpv's render thread like the rest.
+    bool ready() const { return !broken_ && source_ok(); }
+    void set_enabled(bool on);
+    void set_fast(bool fast);
+    void rates(double &source, double &real, double &generated) const {
+        source = source_interval_ > 0 ? 1.0 / source_interval_ : 0;
+        real = real_fps_;
+        generated = generated_fps_;
+    }
     void on_effects_finished(reshade::api::effect_runtime *runtime) {
         if (mpv_swapchain_ && runtime->get_native() != mpv_swapchain_) return;  // another runtime's effects
         effects_ran_ = true;
@@ -1299,6 +1309,7 @@ private:
     double paused_until_ = 0, backoff_ = 5.0, settle_until_ = 0;
 
     bool broken_ = false;
+    double real_fps_ = 0, generated_fps_ = 0;  // over the last stats window, for the menu
     int hz_ = 0;
     double next_hz_try_ = 0;
     Sleeper sleeper_;
@@ -1433,7 +1444,13 @@ void FrameGen::toggle(reshade::api::effect_runtime *runtime) {
         mpv_show_text("Frame generation: needs a launcher with dedup=1");
         return;
     }
-    g_settings.enabled = !g_settings.enabled;
+    set_enabled(!g_settings.enabled);
+    mpv_show_text(g_settings.enabled ? "Frame generation: ON" : "Frame generation: OFF");
+}
+
+void FrameGen::set_enabled(bool on) {
+    if (on == g_settings.enabled) return;
+    g_settings.enabled = on;
     reshade::set_config_value(nullptr, kSection, "Enabled", g_settings.enabled);
     if (capture_.active()) capture_.reset();
     reset_history();
@@ -1441,7 +1458,17 @@ void FrameGen::toggle(reshade::api::effect_runtime *runtime) {
     backoff_ = 5.0;
     drop_times_[0] = drop_times_[1] = -1e9;  // a drop from before does not pair with one after
     log_line(reshade::log::level::info, "toggled %s", g_settings.enabled ? "on" : "off");
-    mpv_show_text(g_settings.enabled ? "Frame generation: ON" : "Frame generation: OFF");
+}
+
+// Quality=fast: the 2x2 cells around each pixel, compared on the pixel alone.
+// Read at every draw, so it changes at once.
+void FrameGen::set_fast(bool fast) {
+    g_settings.fast = fast;
+    interp_.warp_ring = fast ? 2 : 3;
+    interp_.warp_taps = fast ? 1 : 5;
+    interp_.soft_temp = fast ? 0.02f : 0.04f;
+    reshade::set_config_value(nullptr, kSection, "Quality", fast ? "fast" : "high");
+    log_line(reshade::log::level::info, "quality %s", fast ? "fast" : "high");
 }
 
 // New frames dropped upstream: mpv is not keeping up with the source.
@@ -1511,7 +1538,14 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
     toggle(runtime);
     // While frame generation is off, mpv gets every frame as without --dedup:
     // nothing gains from new frames only then (DedupWhenOff=1 keeps them).
-    if (g_link.linked()) g_link.send_repeats(!g_settings.dedup_when_off && (broken_ || !g_settings.enabled));
+    // So too while the in-game menu is open on a still picture (a quarter of
+    // a second without a new frame): only keepalive frames would come, and the
+    // menu is drawn only when a frame is presented. On a moving picture it is
+    // drawn on every frame shown, generated ones included.
+    const bool still_menu =
+        glasir::overlay::menu_open() && g_link.linked() && g_link.since_last(now) > 0.25;
+    if (g_link.linked())
+        g_link.send_repeats(still_menu || (!g_settings.dedup_when_off && (broken_ || !g_settings.enabled)));
     if (broken_ || !g_settings.enabled || !source_ok()) {
         last_real_ = now;
         generated_last_ = false;
@@ -1696,6 +1730,7 @@ void FrameGen::on_finish_present(reshade::api::swapchain *api_swapchain) {
         HoldJob job;
         job.n = hold_.mark_drawn();
         context_->CopyResource(back_buffer.Get(), frames_[pending_slot_].Get());
+        glasir::overlay::draw_again(context_.Get(), back_buffer.Get());
         hold_.wait_release(job.n);
         const HRESULT hr = swapchain->Present(1, 0);
         // Let go even if the present failed: the wait is queued either way.
@@ -1709,6 +1744,7 @@ void FrameGen::on_finish_present(reshade::api::swapchain *api_swapchain) {
         return;
     }
     context_->CopyResource(back_buffer.Get(), frames_[pending_slot_].Get());
+    glasir::overlay::draw_again(context_.Get(), back_buffer.Get());
     sleeper_.until(pending_target_);
     const double out = qpc_seconds();
     const double late = out - pending_target_;
@@ -1728,6 +1764,8 @@ void FrameGen::stats(double now) {
     const double span = now - stats_start_;
     if (span < 5.0) return;
     const Hold::Stats held = hold_.take_stats();
+    real_fps_ = real_ / span;
+    generated_fps_ = generated_ / span;
     if (g_settings.log_stats) {
         const int max_hz = g_settings.max_output_hz > 0 ? g_settings.max_output_hz : hz_;
         const double n = generated_ ? double(generated_) : 1.0;
@@ -1771,6 +1809,8 @@ void FrameGen::stats(double now) {
 
 void on_reshade_present(reshade::api::effect_runtime *runtime) {
     g_gen.on_reshade_present(runtime);
+    // The menu last: over the frame in between (or the frame) mpv presents now.
+    glasir::overlay::on_reshade_present(runtime);
 }
 
 void on_finish_present(reshade::api::command_queue *, reshade::api::swapchain *swapchain) {
@@ -1785,6 +1825,7 @@ void on_finish_effects(reshade::api::effect_runtime *runtime, reshade::api::comm
 void on_present(reshade::api::command_queue *, reshade::api::swapchain *swapchain, const reshade::api::rect *,
                 const reshade::api::rect *, uint32_t, const reshade::api::rect *) {
     g_gen.on_mpv_present(swapchain);
+    glasir::overlay::note_color_space(swapchain->get_color_space());
 }
 
 void register_present_events() {
@@ -1801,10 +1842,13 @@ void unregister_present_events() {
     reshade::unregister_event<reshade::addon_event::present>(on_present);
 }
 
+void set_menu_host();
+
 void on_init_effect_runtime(reshade::api::effect_runtime *) {
     static bool loaded = false;
     if (!loaded) {
         load_settings();
+        set_menu_host();
         loaded = true;
     }
     // ReShade calls add-ons in the order they registered, and loads them in
@@ -1826,7 +1870,21 @@ void on_destroy_swapchain(reshade::api::swapchain *swapchain, bool resize) {
 }
 
 void on_destroy_device(reshade::api::device *device) {
-    if (g_gen.owns(device)) g_gen.release();
+    if (!g_gen.owns(device)) return;
+    glasir::overlay::release();
+    g_gen.release();
+}
+
+void set_menu_host() {
+    glasir::overlay::Host host;
+    host.framegen_ready = [] { return g_gen.ready(); };
+    host.framegen_enabled = [] { return g_settings.enabled; };
+    host.set_framegen_enabled = [](bool on) { g_gen.set_enabled(on); };
+    host.framegen_fast = [] { return g_settings.fast; };
+    host.set_framegen_fast = [](bool fast) { g_gen.set_fast(fast); };
+    host.rates = [](double &source, double &real, double &generated) { g_gen.rates(source, real, generated); };
+    host.mpv_pipe = g_settings.mpv_pipe;
+    glasir::overlay::set_host(host);
 }
 
 }  // namespace
