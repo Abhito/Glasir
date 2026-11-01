@@ -45,12 +45,18 @@
   flip and VRR. Check presentation changes with PresentMon
   (`MPV-SW-Capture	ools\presentmon`).
 - Updates and bug reports (`src/app/update.cpp`, `bug_report.cpp`): the repo
-  is private, so the update check gets 404 until it is public with a
-  release. Test with `GLASIR_UPDATE_TEST_RELEASE=<release.json>` (GitHub's
-  answer from a file), `GLASIR_UPDATE_REPO=owner/name`, and
-  `Glasir.exe --update-from out\Glasir-x.y.z.zip` on a copy of the app folder
+  is public and releases are real (v0.1.0 first); publishing one is the
+  owner's call. Test with `GLASIR_UPDATE_TEST_RELEASE=<release.json>` (GitHub's
+  answer from a file), `GLASIR_UPDATE_REPO=owner/name`,
+  `Glasir.exe --update-from out\Glasir-x.y.z.zip`, or an older-version build
+  running `--update` against GitHub, always on a copy of the app folder
   (never on out\Glasir while the owner uses it). F9 can be posted to mpv's
   window (class `mpv`) without focus; reports go to `Bug reports\`.
+- Do not build in a folder under `%TEMP%`: MSBuild does not track headers
+  there, so a changed `glasir_version.h` is not recompiled (the exe keeps the
+  old version). Use a worktree elsewhere, e.g. next to the repo.
+- `main` has a ruleset (no force pushes or deletion; others need a pull
+  request); the repository admin bypasses it.
 - Driving mpv in tests: mpv ignores key messages posted from another
   process (ReShade's input does see them: F9, Tab); use IPC `keypress KEY` to
   run mpv's own bindings. To see the picture with the overlay (toasts, menu),
