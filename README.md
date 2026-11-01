@@ -39,13 +39,15 @@ in the repo; the installer downloads them. Until the installer exists:
 ```
 powershell -ExecutionPolicy Bypass -File tools\fetch-mpv.ps1       # latest mpv into out\Glasir\engine
 powershell -ExecutionPolicy Bypass -File tools\fetch-reshade.ps1   # ReShade (add-on build) from reshade.me
+powershell -ExecutionPolicy Bypass -File tools\fetch-dlss5.ps1     # DLSS 5 components (about 250 MB)
 out\Glasir\Glasir.exe --list    # the capture cards and their modes
 out\Glasir\Glasir.exe           # play; the first run writes out\Glasir\glasir.ini
 ```
 
-`glasir.ini` picks the card, size, rate, SDR or HDR, dedup, sound and the
-window mode; every key is explained in the file. The card's own audio input
-is found automatically.
+`glasir.ini` picks the card, size, rate, SDR or HDR, dedup, frame
+generation, DLSS 5, sound and the window mode; every key is explained in the
+file. The card's own audio input is found automatically. DLSS 5 turns itself
+on with an NVIDIA RTX 50 series GPU (`[dlss5] enabled = auto`).
 
 | Key | |
 |---|---|
@@ -55,13 +57,14 @@ is found automatically.
 | `Ctrl+Up` / `Ctrl+Down` | audio boost (up to 400 %) |
 | `[` / `]` | audio delay -/+ 10 ms (lip sync) |
 | `Ctrl+r` | restart the sound (after changing the output device) |
+| `F6` | DLSS 5 neural rendering on/off |
 | `F8` | frame generation on/off (needs ReShade) |
 | `F9` | save the frames around now for a bug report (in `Captures\`) |
 | `s` | screenshot (in `Screenshots\`) |
 | `q` | quit |
 
-Logs are in `logs\` (`glasir.log`, `audio.log`); ReShade and frame
-generation log to `engine\ReShade.log`.
+Logs are in `logs\` (`glasir.log`, `audio.log`); ReShade, frame
+generation and DLSS 5 log to `engine\ReShade.log` (and `engine\dlss5-feed.log`).
 
 Testing without a capture card (needs ffmpeg and Python):
 

@@ -40,6 +40,7 @@
 #include "glasir_version.h"
 #include "log.h"
 #include "mpv_launch.h"
+#include "gpu.h"
 #include "reshade_config.h"
 #include "settings.h"
 
@@ -570,11 +571,24 @@ int run(const Args &args, bool &stuck) {
     }
     CreateDirectoryW(plan.screenshot_dir.c_str(), nullptr);
     if (reshade_installed(engine)) {
-        write_reshade_config(engine, s);
+        // DLSS 5: auto runs it on an RTX 50 GPU; on tries any GPU.
+        const GpuInfo gpu = display_gpu();
+        const bool installed = dlss5_installed(engine);
+        const bool dlss5 = installed && (s.dlss5 == Settings::Dlss5::On ||
+                                         (s.dlss5 == Settings::Dlss5::Auto && is_rtx50(gpu)));
+        write_reshade_config(engine, s, dlss5);
         log(L"ReShade: on; frame generation {}{}", s.framegen ? L"on" : L"off",
             s.framegen && !s.dedup ? L" but needs dedup = 1: it stays off" : L"");
+        std::wstring why;
+        if (!installed)
+            why = L" (its files are not in engine; run the installer)";
+        else if (s.dlss5 == Settings::Dlss5::Off)
+            why = L" (glasir.ini)";
+        else if (!dlss5)
+            why = L" (needs an RTX 50 series GPU; [dlss5] enabled = on tries anyway)";
+        log(L"DLSS 5: {}{}; GPU: {}", dlss5 ? L"on" : L"off", why, gpu.found ? gpu.name : L"unknown");
     } else {
-        log(L"ReShade is not in {}: no frame generation", engine);
+        log(L"ReShade is not in {}: no frame generation or DLSS 5", engine);
     }
 
     HANDLE quit_event = CreateEventW(nullptr, TRUE, FALSE, kQuitEvent);

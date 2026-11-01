@@ -4,11 +4,13 @@
 #include <shellapi.h>
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "devices.h"
 #include "mpv_launch.h"
+#include "reshade_config.h"
 #include "settings.h"
 
 using namespace glasir;
@@ -209,6 +211,68 @@ int main() {
         bool sized = false;
         for (const auto &a : args) sized = sized || a.find(L"video_size") != std::wstring::npos;
         expect(!sized, "DirectShow, nothing known or asked: the driver's default");
+    }
+    {
+        // ReShade.ini, ReShadePreset.ini, dlss5-feed.cfg in a scratch engine folder.
+        wchar_t tmp[MAX_PATH];
+        GetTempPathW(MAX_PATH, tmp);
+        const std::wstring engine = std::wstring(tmp) + L"glasir_test_engine";
+        CreateDirectoryW(engine.c_str(), nullptr);
+        CreateDirectoryW((engine + L"\\reshade-shaders").c_str(), nullptr);
+        CreateDirectoryW((engine + L"\\reshade-shaders\\Shaders").c_str(), nullptr);
+        CreateDirectoryW((engine + L"\\reshade-shaders\\Shaders\\DLSS5Feeder").c_str(), nullptr);
+        auto touch = [&](const std::wstring &name, const char *text) {
+            HANDLE f = CreateFileW((engine + name).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+            DWORD n = 0;
+            WriteFile(f, text, DWORD(strlen(text)), &n, nullptr);
+            CloseHandle(f);
+        };
+        auto read = [&](const std::wstring &name) {
+            std::string out;
+            HANDLE f = CreateFileW((engine + name).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0,
+                                   nullptr);
+            char buf[4096];
+            DWORD n = 0;
+            while (f != INVALID_HANDLE_VALUE && ReadFile(f, buf, sizeof(buf), &n, nullptr) && n) out.append(buf, n);
+            if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+            return out;
+        };
+        // What ReShade writes itself on a first run, and a user's own effect path.
+        touch(L"\\ReShade.ini", "[GENERAL]\r\nEffectSearchPaths=.\\,D:\\MyShaders\\**\r\nTextureSearchPaths=.\\\r\n"
+                                "PreprocessorDefinitions=\r\n[OVERLAY]\r\nTutorialProgress=1\r\n");
+        DeleteFileW((engine + L"\\ReShadePreset.ini").c_str());
+        DeleteFileW((engine + L"\\dlss5-feed.cfg").c_str());
+        Settings s;
+        expect(!dlss5_installed(engine), "DLSS 5 files missing: not installed");
+        for (const wchar_t *f : {L"\\dlss5-feed.addon64", L"\\renodx-dlss5.addon64", L"\\nvngx_dlssnr.dll",
+                                 L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
+            touch(f, "x");
+        expect(dlss5_installed(engine), "DLSS 5 files there: installed");
+        write_reshade_config(engine, s, true);
+        std::string ini = read(L"\\ReShade.ini");
+        expect(ini.find(".\\reshade-shaders\\Shaders\\**,.\\,D:\\MyShaders\\**") != std::string::npos,
+               "effect path added in front, the user's kept");
+        expect(ini.find("TextureSearchPaths=.\\reshade-shaders\\Textures\\**\r\n") != std::string::npos,
+               "texture path replaces ReShade's bare default");
+        expect(ini.find("PreprocessorDefinitions=DLSS5_MV_PROVIDER=3") != std::string::npos, "Lumenite motion vectors");
+        expect(ini.find("TutorialProgress=1") != std::string::npos, "an existing ReShade value is not overwritten");
+        expect(ini.find("NeuralUplift=1") != std::string::npos && ini.find("[GLASIR_FRAMEGEN]") != std::string::npos,
+               "DLSS 5 and frame generation keys written");
+        expect(read(L"\\ReShadePreset.ini").rfind("Techniques=Lumenite_Kernel@lumenite_Kernel.fx,DLSS5_Feed", 0) == 0,
+               "preset enables the DLSS 5 effects");
+        expect(read(L"\\dlss5-feed.cfg").empty(), "DLSS 5 on: the Feeder's file is left for the Feeder to write");
+        touch(L"\\dlss5-feed.cfg", "enabled=1\r\nmode=2\r\n");
+        touch(L"\\ReShadePreset.ini", "Techniques=X@x.fx\r\nTechniqueSorting=X@x.fx\r\n\r\n[x.fx]\r\nA=1\r\n");
+        write_reshade_config(engine, s, false);
+        expect(read(L"\\ReShade.ini").find("NeuralUplift=0") != std::string::npos, "DLSS 5 off: NeuralUplift=0");
+        expect(read(L"\\dlss5-feed.cfg") == "enabled=0\r\nmode=2\r\n", "DLSS 5 off: Feeder off, its other keys kept");
+        const std::string preset = read(L"\\ReShadePreset.ini");
+        expect(preset.rfind("Techniques=\r\n", 0) == 0 && preset.find("[x.fx]\r\nA=1") != std::string::npos,
+               "DLSS 5 off: no effects, the preset's sections kept");
+        for (const wchar_t *f : {L"\\ReShade.ini", L"\\ReShadePreset.ini", L"\\dlss5-feed.cfg", L"\\dlss5-feed.addon64",
+                                 L"\\renodx-dlss5.addon64", L"\\nvngx_dlssnr.dll",
+                                 L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
+            DeleteFileW((engine + f).c_str());
     }
     std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
     return g_failures ? 1 : 0;

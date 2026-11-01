@@ -111,6 +111,12 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
     } else if (name == L"framegen.all_frames_when_off") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.all_frames_when_off = b;
+    } else if (name == L"dlss5.enabled") {
+        const std::wstring l = lower(value);
+        if (l == L"auto") s.dlss5 = Settings::Dlss5::Auto;
+        else if (l == L"on" || l == L"1") s.dlss5 = Settings::Dlss5::On;
+        else if (l == L"off" || l == L"0") s.dlss5 = Settings::Dlss5::Off;
+        else return bad(L"auto, on or off");
     } else if (name == L"audio.enabled") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.audio = b;
@@ -189,6 +195,12 @@ quality = high
 ; While frame generation is off (F8): 1 = send mpv every frame (lowest
 ; latency), 0 = new frames only.
 all_frames_when_off = 1
+
+[dlss5]
+; DLSS 5 neural rendering (NVIDIA RTX 50 series). auto: on with an RTX 50
+; GPU, off otherwise. on: always try (e.g. with an unlock for older GPUs).
+; off: never. F6 toggles it while playing.
+enabled = auto
 
 [audio]
 ; 1: play the card's sound (low latency, through mpv). 0: no sound.

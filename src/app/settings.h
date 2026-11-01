@@ -28,6 +28,9 @@ struct Settings {
     bool framegen = true;
     bool framegen_fast = false;       // quality = fast: about half the GPU time
     bool all_frames_when_off = true;  // frame generation off: every frame (lowest latency)
+    // [dlss5]
+    enum class Dlss5 { Auto, On, Off };
+    Dlss5 dlss5 = Dlss5::Auto;  // auto: on with an RTX 50 series GPU
     // [audio]
     bool audio = true;
     std::wstring audio_device;  // empty: the card's own audio input

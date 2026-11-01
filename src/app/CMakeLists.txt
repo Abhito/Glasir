@@ -2,12 +2,13 @@
 # Glasir.exe: settings, capture card -> mpv.
 
 add_library(glasir_app_core STATIC
+    gpu.cpp
     mpv_launch.cpp
     reshade_config.cpp
     settings.cpp)
 glasir_component(glasir_app_core)
 target_include_directories(glasir_app_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(glasir_app_core PUBLIC glasir_capture)
+target_link_libraries(glasir_app_core PUBLIC glasir_capture dxgi)
 
 add_executable(glasir WIN32 main.cpp)
 set_target_properties(glasir PROPERTIES OUTPUT_NAME Glasir)

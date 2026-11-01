@@ -109,7 +109,8 @@ Each step tested against the real capture card before the next:
    based on z-er's public source; finds the card's audio input by itself)*
 4. Frame generation add-on + VRR hold + send-repeats. *(done: src/framegen, MPL-2.0;
    same shaders and scores as the prototype; VRR measurement tools not ported yet)*
-5. DLSS 5 (Feeder + RenoDX-DLSS5) wiring.
+5. DLSS 5 (Feeder + RenoDX-DLSS5) wiring. *(done: tools/fetch-dlss5.ps1, [dlss5]
+   auto/on/off with RTX 50 detection; nvngx_dlss.dll from NVIDIA's own SDK works)*
 6. Installer (component downloads) + settings file.
 7. Launcher + in-game menu (after-effects overlay prototype first).
 8. Update check / self-update, bug-report capture, docs.

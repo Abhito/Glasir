@@ -92,7 +92,8 @@ does not distribute them; their licences apply as published by their authors.
 | mpv (Windows build) | https://github.com/zhongfly/mpv-winbuild | GPL-3.0 (mpv: GPL-2.0-or-later, built with GPL-3.0 FFmpeg) |
 | ReShade with add-on support | https://reshade.me | BSD-3-Clause source; binary from reshade.me |
 | DLSS5-Feeder | https://github.com/jlrouzies-fr/DLSS5-Feeder | MIT |
-| LumeniteFX | https://github.com/umar-afzaal/LumeniteFX | AGNYA License |
+| LumeniteFX by Kaidō (Afzaal) | https://github.com/umar-afzaal/LumeniteFX | AGNYA License (its LICENSE.md is placed beside it) |
+| ReShade.fxh | https://github.com/crosire/reshade-shaders | CC0-1.0 |
 | RenoDX-DLSS5 | https://github.com/RankFTW/rhi-repo (RHI mirror) | MIT (source: Yukikaze20170315/RenoDX-DLSS5-Generic, clshortfuse/renodx) |
 | NVIDIA DLSS (`nvngx_dlss.dll`) | https://github.com/NVIDIA/DLSS | NVIDIA RTX SDKs licence |
 | NVIDIA DLSS neural rendering (`nvngx_dlssnr.dll`) | https://github.com/RankFTW/rhi-repo (RHI mirror) | NVIDIA |
