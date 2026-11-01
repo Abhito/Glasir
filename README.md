@@ -42,10 +42,22 @@ out\Glasir\Glasir.exe --list    # the capture cards and their modes
 out\Glasir\Glasir.exe           # play; the first run writes out\Glasir\glasir.ini
 ```
 
-`glasir.ini` picks the card, size, rate, SDR or HDR, dedup and the window
-mode; every key is explained in the file. In the player: double-click or
-`f` for full screen, `s` for a screenshot (in `Screenshots\`), `q` to quit.
-Logs are in `logs\`.
+`glasir.ini` picks the card, size, rate, SDR or HDR, dedup, sound and the
+window mode; every key is explained in the file. The card's own audio input
+is found automatically.
+
+| Key | |
+|---|---|
+| double-click, `f` | full screen |
+| `Up` / `Down`, mouse wheel | volume |
+| `m` | mute |
+| `Ctrl+Up` / `Ctrl+Down` | audio boost (up to 400 %) |
+| `[` / `]` | audio delay -/+ 10 ms (lip sync) |
+| `Ctrl+r` | restart the sound (after changing the output device) |
+| `s` | screenshot (in `Screenshots\`) |
+| `q` | quit |
+
+Logs are in `logs\` (`glasir.log`, `audio.log`).
 
 Testing without a capture card (needs ffmpeg and Python):
 

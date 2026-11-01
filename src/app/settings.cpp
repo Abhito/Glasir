@@ -100,6 +100,25 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
     } else if (name == L"frames.dedup_keepalive_ms") {
         if (!parse_int(value, 0, 60000, n)) return bad(L"0 to 60000");
         s.dedup_keepalive_ms = DWORD(n);
+    } else if (name == L"audio.enabled") {
+        if (!parse_bool(value, b)) return bad(L"1 or 0");
+        s.audio = b;
+    } else if (name == L"audio.device") {
+        s.audio_device = value;
+    } else if (name == L"audio.volume") {
+        if (!parse_int(value, 0, 100, n)) return bad(L"0 to 100");
+        s.volume = int(n);
+    } else if (name == L"audio.boost") {
+        if (!parse_int(value, 100, 400, n)) return bad(L"100 to 400");
+        s.boost = int(n);
+    } else if (name == L"audio.delay_ms") {
+        if (!parse_int(value, 0, 1000, n)) return bad(L"0 to 1000");
+        s.audio_delay_ms = int(n);
+    } else if (name == L"audio.period") {
+        const std::wstring l = lower(value);
+        if (l == L"minimum") s.audio_min_period = true;
+        else if (l == L"default") s.audio_min_period = false;
+        else return bad(L"minimum or default");
     } else if (name == L"window.mode") {
         const std::wstring l = lower(value);
         if (l == L"borderless") s.borderless = true;
@@ -149,6 +168,21 @@ dedup = 1
 dedup_threshold = 3
 ; A still picture is still sent this often (ms), so menus keep drawing.
 dedup_keepalive_ms = 200
+
+[audio]
+; 1: play the card's sound (low latency, through mpv). 0: no sound.
+enabled = 1
+; The audio input to use. Empty: the card's own (found automatically).
+device =
+; Volume 0-100 and boost 100-400 (%). Keys: Up/Down volume, M mute,
+; Ctrl+Up/Down boost.
+volume = 100
+boost = 100
+; Holds the sound back (ms) so it matches the picture; DLSS 5 and frame
+; generation make the picture a little later. Keys: [ and ].
+delay_ms = 0
+; minimum: lowest latency. default: steadier if the sound crackles.
+period = minimum
 
 [window]
 ; borderless (fills the screen) or windowed.

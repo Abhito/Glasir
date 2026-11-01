@@ -16,3 +16,8 @@ add_executable(test_launch test_launch.cpp)
 glasir_component(test_launch)
 target_link_libraries(test_launch PRIVATE glasir_app_core shell32)
 add_test(NAME launch COMMAND test_launch)
+
+add_executable(test_audio test_audio.cpp)
+glasir_component(test_audio)
+target_link_libraries(test_audio PRIVATE glasir_capture)
+add_test(NAME audio COMMAND test_audio)

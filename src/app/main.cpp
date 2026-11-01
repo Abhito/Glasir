@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "../common/framegen_link.h"
+#include "audio_endpoint.h"
 #include "capture.h"
 #include "devices.h"
 #include "glasir_version.h"
@@ -337,6 +338,7 @@ struct Source {
     ComPtr<IMFMediaSource> source;
     ComPtr<IMFSourceReader> reader;
     std::wstring device_name;
+    std::wstring symbolic_link;  // the card's, for finding its audio input
     // --input-raw
     HANDLE raw_input = nullptr;
     bool raw_owned = false;
@@ -409,6 +411,7 @@ bool open_source(const Args &args, const Settings &s, Source &src) {
                 src.layout = {mode->format, mode->width, mode->height};
                 src.fps = mode->fps;
                 src.device_name = device->name;
+                src.symbolic_link = device->symbolic_link;
                 return true;
             }
         }
@@ -472,6 +475,8 @@ bool open_source(const Args &args, const Settings &s, Source &src) {
     }
     src.raw = false;
     src.dshow_device = name;
+    src.device_name = name;
+    if (device) src.symbolic_link = device->symbolic_link;
     log(L"capture: \"{}\"{} (DirectShow: no dedup or frame generation)", name,
         src.dshow_mode ? L", " + mode_text(*src.dshow_mode) : L"");
     return true;
@@ -501,6 +506,23 @@ private:
     HANDLE stop_;
     std::thread thread_;
 };
+
+// The card's audio input for the audio plugin. Without one there is no sound
+// (mpv says so on screen); --input-raw tests get sound only when asked.
+void choose_audio(const Settings &s, const Source &src, MpvPlan &plan) {
+    if (src.raw_input && s.audio_device.empty()) return;
+    const auto inputs = list_audio_inputs();
+    const auto container = video_container(src.symbolic_link);
+    if (const auto audio = find_card_audio(inputs, src.device_name, container, s.audio_device)) {
+        plan.audio_device = audio->id;
+        log(L"audio: \"{}\"{}", audio->name, s.audio_device.empty() ? L" (the card's)" : L" (glasir.ini)");
+        return;
+    }
+    plan.audio_missing = true;
+    log(L"no audio input found for \"{}\"{}; audio inputs:", src.device_name,
+        s.audio_device.empty() ? L"" : L" named \"" + s.audio_device + L"\"");
+    for (const auto &a : inputs) log(L"  {}", a.name);
+}
 
 std::wstring capture_end_error(HRESULT ended, const std::wstring &device) {
     if (card_in_use(ended))
@@ -567,6 +589,8 @@ int run(const Args &args, bool &stuck) {
     plan.fps = src.fps;
     plan.dshow_device = src.dshow_device;
     plan.dshow_mode = src.dshow_mode;
+    plan.audio_log = dir + L"\\logs\\audio.log";
+    if (s.audio) choose_audio(s, src, plan);
 
     MpvProcess mpv;
     if (!mpv.start(join_command_line(plan.mpv_exe, mpv_arguments(plan, s)), plan.raw, error)) {

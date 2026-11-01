@@ -27,6 +27,12 @@ struct MpvPlan {
     double fps = 0;               // raw: the capture rate
     std::wstring dshow_device;    // DirectShow
     std::optional<VideoMode> dshow_mode;  // DirectShow: the mode to ask for, if known
+
+    // The audio plugin (glasir_audio.dll): the endpoint to capture, empty for
+    // none; audio_missing: the card's audio input was not found (say so).
+    std::wstring audio_device;
+    std::wstring audio_log;
+    bool audio_missing = false;
 };
 
 // mpv's arguments (without the program).

@@ -105,7 +105,8 @@ Each step tested against the real capture card before the next:
 2. Capture (msc_hdr_capture: MF NV12/P010, dedup) + mpv launch, SDR and HDR,
    DirectShow fallback. *(done: Glasir.exe replaces the two .bat launchers;
    also YUY2/UYVY cards, automatic card and mode choice, glasir.ini)*
-3. Audio (msc_audio from z-er's source) + boost + delay.
+3. Audio (msc_audio from z-er's source) + boost + delay. *(done: glasir_audio.dll,
+   based on z-er's public source; finds the card's audio input by itself)*
 4. Frame generation add-on + VRR hold + send-repeats.
 5. DLSS 5 (Feeder + RenoDX-DLSS5) wiring.
 6. Installer (component downloads) + settings file.

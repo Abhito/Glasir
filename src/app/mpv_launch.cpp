@@ -67,6 +67,20 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
     }
     if (!plan.log_file.empty()) a.push_back(L"--log-file=" + plan.log_file);
 
+    // Sound: glasir_audio.dll (portable_config\scripts) plays the card's
+    // audio input; mpv's volume and mute drive it.
+    a.push_back(std::format(L"--volume={}", s.volume));
+    a.push_back(L"--volume-max=100");
+    auto opt = [&](const std::wstring &key, const std::wstring &value) {
+        a.push_back(L"--script-opts-append=glasir_audio-" + key + L"=" + value);
+    };
+    opt(L"device", plan.audio_device);
+    opt(L"delay", std::to_wstring(s.audio_delay_ms));
+    opt(L"boost", std::to_wstring(s.boost));
+    opt(L"period", s.audio_min_period ? L"minimum" : L"default");
+    if (!plan.audio_log.empty()) opt(L"log", plan.audio_log);
+    if (plan.audio_missing) opt(L"missing", L"1");
+
     if (plan.raw) {
         a.push_back(L"--cache=no");
         a.push_back(L"--demuxer=rawvideo");

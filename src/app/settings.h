@@ -24,6 +24,13 @@ struct Settings {
     bool dedup = true;
     int dedup_threshold = 3;
     DWORD dedup_keepalive_ms = 200;
+    // [audio]
+    bool audio = true;
+    std::wstring audio_device;  // empty: the card's own audio input
+    int volume = 100;           // 0-100 %
+    int boost = 100;            // 100-400 %
+    int audio_delay_ms = 0;     // 0-1000
+    bool audio_min_period = true;
     // [window]
     bool borderless = true;
     // [debug]

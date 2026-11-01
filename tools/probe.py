@@ -80,6 +80,9 @@ def main():
             path = request(pipe, ['get_property', 'path'], 4)
             print(f"mpv: {path}: {out.get('w')}x{out.get('h')} {out.get('pixelformat')} {out.get('colormatrix')} "
                   f"{out.get('colorlevels')} {out.get('gamma')}, {(n1 - n0) / (t1 - t0):.1f} fps shown")
+            audio = request(pipe, ['get_property', 'user-data/glasir/audio-status'], 6)
+            stats = request(pipe, ['get_property', 'user-data/glasir/audio-stats'], 7)
+            print(f'audio: {audio}; {stats}')
             if grabs:
                 grab(pipe, grabs)
             request(pipe, ['quit'], 5)

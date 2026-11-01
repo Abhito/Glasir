@@ -44,10 +44,39 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
+### WASAPI audio plugin (z-er, MPV-SW-Capture)
+
+Glasir's audio plugin (`src/audio`, `glasir_audio.dll`) is based on the
+WASAPI audio plugin by z-er (Josh S) for MPV-SW-Capture:
+https://github.com/z-er/MPV-SW-Capture (`native-audio/`). Modified for Glasir.
+
+```
+MIT License
+
+Copyright (c) 2026 TyRaS-SW
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 <!--
 Added as each part is ported (docs/PLAN.md):
 - MPV-SW-Capture by TyRaS-SW (MIT) - scripts we keep, marked as modified.
-- WASAPI audio plugin by z-er (MIT, from github.com/z-er/MPV-SW-Capture).
 - AMD FSR1 (MIT), NVIDIA Image Scaling (MIT), Adaptive Sharpen (BSD-2-Clause),
   KrigBilateral (LGPL-3.0, own file + LICENSES/LGPL-3.0.txt).
 - DLSS5-Feeder (MIT, Jean-Laurent Rouzies; portions NIGos, MIT) if shipped.
