@@ -24,6 +24,10 @@ struct Settings {
     bool dedup = true;
     int dedup_threshold = 3;
     DWORD dedup_keepalive_ms = 200;
+    // [framegen]
+    bool framegen = true;
+    bool framegen_fast = false;       // quality = fast: about half the GPU time
+    bool all_frames_when_off = true;  // frame generation off: every frame (lowest latency)
     // [audio]
     bool audio = true;
     std::wstring audio_device;  // empty: the card's own audio input

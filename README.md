@@ -37,7 +37,8 @@ This configures, builds, runs the tests and puts the portable app folder in
 in the repo; the installer downloads them. Until the installer exists:
 
 ```
-powershell -ExecutionPolicy Bypass -File tools\fetch-mpv.ps1   # latest mpv into out\Glasir\engine
+powershell -ExecutionPolicy Bypass -File tools\fetch-mpv.ps1       # latest mpv into out\Glasir\engine
+powershell -ExecutionPolicy Bypass -File tools\fetch-reshade.ps1   # ReShade (add-on build) from reshade.me
 out\Glasir\Glasir.exe --list    # the capture cards and their modes
 out\Glasir\Glasir.exe           # play; the first run writes out\Glasir\glasir.ini
 ```
@@ -54,10 +55,13 @@ is found automatically.
 | `Ctrl+Up` / `Ctrl+Down` | audio boost (up to 400 %) |
 | `[` / `]` | audio delay -/+ 10 ms (lip sync) |
 | `Ctrl+r` | restart the sound (after changing the output device) |
+| `F8` | frame generation on/off (needs ReShade) |
+| `F9` | save the frames around now for a bug report (in `Captures\`) |
 | `s` | screenshot (in `Screenshots\`) |
 | `q` | quit |
 
-Logs are in `logs\` (`glasir.log`, `audio.log`).
+Logs are in `logs\` (`glasir.log`, `audio.log`); ReShade and frame
+generation log to `engine\ReShade.log`.
 
 Testing without a capture card (needs ffmpeg and Python):
 

@@ -3,6 +3,7 @@
 
 add_library(glasir_app_core STATIC
     mpv_launch.cpp
+    reshade_config.cpp
     settings.cpp)
 glasir_component(glasir_app_core)
 target_include_directories(glasir_app_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

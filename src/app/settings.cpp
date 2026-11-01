@@ -100,6 +100,17 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
     } else if (name == L"frames.dedup_keepalive_ms") {
         if (!parse_int(value, 0, 60000, n)) return bad(L"0 to 60000");
         s.dedup_keepalive_ms = DWORD(n);
+    } else if (name == L"framegen.enabled") {
+        if (!parse_bool(value, b)) return bad(L"1 or 0");
+        s.framegen = b;
+    } else if (name == L"framegen.quality") {
+        const std::wstring l = lower(value);
+        if (l == L"high") s.framegen_fast = false;
+        else if (l == L"fast") s.framegen_fast = true;
+        else return bad(L"high or fast");
+    } else if (name == L"framegen.all_frames_when_off") {
+        if (!parse_bool(value, b)) return bad(L"1 or 0");
+        s.all_frames_when_off = b;
     } else if (name == L"audio.enabled") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.audio = b;
@@ -168,6 +179,16 @@ dedup = 1
 dedup_threshold = 3
 ; A still picture is still sent this often (ms), so menus keep drawing.
 dedup_keepalive_ms = 200
+
+[framegen]
+; 1: frame generation doubles the frame rate (30 -> 60, 60 -> 120) when the
+; display can show it. Needs dedup = 1 and ReShade. F8 toggles it while playing.
+enabled = 1
+; high, or fast (about half the GPU time, a little less clean).
+quality = high
+; While frame generation is off (F8): 1 = send mpv every frame (lowest
+; latency), 0 = new frames only.
+all_frames_when_off = 1
 
 [audio]
 ; 1: play the card's sound (low latency, through mpv). 0: no sound.

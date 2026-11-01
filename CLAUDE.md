@@ -17,6 +17,12 @@
   so you can look at them (downscale before viewing: 2560x1440 PNGs).
   Both open a window for a few seconds. Glasir allows one instance; its IPC
   pipe is `\\.\pipe\glasir`.
+- Frame generation (`src/framegen`, MPL-2.0, design in its README.md): after a
+  change to the shaders or `fg_interp.h`, compare `fg_eval.exe` scores before
+  and after (clips/captures stay outside the repo; the prototype's are in
+  `mpv_video\MPV-SW-Capture\framegen-addon\eval\seq` and `framegen-captures`).
+  `GLASIR_FRAMEGEN_CAPTURE_AFTER=<s>` makes the add-on save frames to
+  `out\Glasir\Captures` (16-bit PQ for HDR: tone-map before viewing).
 - Git Bash heredocs collapse `\\` to `\` (e.g. `\\.\pipe\...`): write
   scripts with the Write tool, not `cat <<EOF`.
 - Licences: MIT everywhere except `src/framegen/` (MPL-2.0). Every source

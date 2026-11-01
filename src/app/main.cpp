@@ -40,6 +40,7 @@
 #include "glasir_version.h"
 #include "log.h"
 #include "mpv_launch.h"
+#include "reshade_config.h"
 #include "settings.h"
 
 using namespace glasir;
@@ -568,6 +569,13 @@ int run(const Args &args, bool &stuck) {
         return 1;
     }
     CreateDirectoryW(plan.screenshot_dir.c_str(), nullptr);
+    if (reshade_installed(engine)) {
+        write_reshade_config(engine, s);
+        log(L"ReShade: on; frame generation {}{}", s.framegen ? L"on" : L"off",
+            s.framegen && !s.dedup ? L" but needs dedup = 1: it stays off" : L"");
+    } else {
+        log(L"ReShade is not in {}: no frame generation", engine);
+    }
 
     HANDLE quit_event = CreateEventW(nullptr, TRUE, FALSE, kQuitEvent);
     Instance instance(quit_event);
