@@ -32,6 +32,9 @@
   front (the owner may be using the PC), capture it with `PrintWindow`
   (flag 3) rather than copying the screen; sending keys needs the window in
   front, so check `GetForegroundWindow()` first.
+  The launcher can be driven without focus by posting WM_KEYDOWN/WM_KEYUP
+  (ImGui keyboard navigation: arrows, Space); posted mouse clicks are not
+  reliable, as Windows sends WM_MOUSELEAVE when the real cursor is elsewhere.
 - Git Bash heredocs collapse `\\` to `\` (e.g. `\\.\pipe\...`): write
   scripts with the Write tool, not `cat <<EOF`.
 - Licences: MIT everywhere except `src/framegen/` (MPL-2.0). Every source

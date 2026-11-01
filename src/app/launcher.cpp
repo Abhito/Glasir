@@ -129,6 +129,27 @@ std::vector<ModeItem> modes_for(const CaptureDevice *d, bool hdr) {
     return out;
 }
 
+// Whether the card also offers this mode in HDR (10-bit, P010).
+bool has_hdr(const CaptureDevice *d, UINT32 w, UINT32 h, double fps) {
+    if (!d) return false;
+    for (const auto &m : d->modes)
+        if (m.supported && m.format == PixelFormat::P010 && m.width == w && m.height == h && std::abs(m.fps - fps) < 0.01)
+            return true;
+    return false;
+}
+
+// A list item with "HDR" at its right end when hdr is set.
+bool mode_item(const std::string &label, bool on, bool hdr) {
+    const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+    const bool clicked = ImGui::Selectable(label.c_str(), on);
+    if (hdr) {
+        const char *tag = "HDR";
+        ImGui::SameLine(right - ImGui::CalcTextSize(tag).x - ImGui::GetStyle().ItemSpacing.x);
+        ImGui::TextColored(ImGui::GetStyleColorVec4(on || ImGui::IsItemHovered() ? ImGuiCol_Text : ImGuiCol_TextDisabled), "%s", tag);
+    }
+    return clicked;
+}
+
 // ---------------------------------------------------------------- the window
 
 struct Window {
@@ -342,7 +363,8 @@ void draw(Screen &s) {
         if (ImGui::RadioButton("SDR", !c.hdr)) c.hdr = false;
         ImGui::SameLine();
         if (ImGui::RadioButton("HDR", c.hdr)) c.hdr = true;
-        if (c.hdr) dim("HDR needs HDR on the console, and a card with a 10-bit (P010) mode.");
+        dim(c.hdr ? "HDR needs HDR on the console. Only the card's HDR (10-bit) modes are listed."
+                  : "Modes marked HDR can also be played in HDR.");
 
         const auto modes = modes_for(device, c.hdr);
         bool mode_ok = c.width == 0;
@@ -357,12 +379,13 @@ void draw(Screen &s) {
         row("Mode");
         const std::string mode_label = c.width ? mode_text(c.width, c.height, c.fps) : auto_mode;
         if (ImGui::BeginCombo("##mode", mode_label.c_str())) {
-            if (ImGui::Selectable(auto_mode.c_str(), c.width == 0)) c.width = c.height = 0, c.fps = 0;
+            const bool auto_hdr = !c.hdr && picked && has_hdr(device, picked->width, picked->height, picked->fps);
+            if (mode_item(auto_mode, c.width == 0, auto_hdr)) c.width = c.height = 0, c.fps = 0;
             int id = 0;
             for (const auto &m : modes) {
                 const bool on = m.width == c.width && m.height == c.height && std::abs(m.fps - c.fps) < 0.01;
                 ImGui::PushID(id++);
-                if (ImGui::Selectable(mode_text(m.width, m.height, m.fps).c_str(), on)) {
+                if (mode_item(mode_text(m.width, m.height, m.fps), on, !c.hdr && has_hdr(device, m.width, m.height, m.fps))) {
                     c.width = m.width;
                     c.height = m.height;
                     c.fps = m.fps;
