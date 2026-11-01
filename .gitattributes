@@ -1,0 +1,24 @@
+* text=auto
+
+# Windows scripts need CRLF to run reliably.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+*.cpp text
+*.h text
+*.hpp text
+*.hlsl text
+*.fx text
+*.fxh text
+*.glsl text
+*.lua text
+*.py text
+*.md text
+*.json text
+*.cmake text
+CMakeLists.txt text
+
+*.png binary
+*.ico binary

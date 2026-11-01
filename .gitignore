@@ -1,0 +1,28 @@
+# Build output
+/build/
+/out/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Editors
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Python
+__pycache__/
+*.pyc
+
+# Never commit: downloaded third-party binaries, game footage, logs
+*.exe
+*.dll
+*.addon64
+*.addon32
+/captures/
+/framegen-captures/
+*.raw
+*.log

@@ -1,0 +1,40 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "vs",
+      "displayName": "Visual Studio (x64)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs",
+      "installDir": "${sourceDir}/out/Glasir"
+    },
+    {
+      "name": "vs2022",
+      "displayName": "Visual Studio 2022 (x64)",
+      "inherits": "vs",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/vs2022"
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "vs", "configuration": "Release" },
+    { "name": "debug", "configurePreset": "vs", "configuration": "Debug" },
+    { "name": "release-vs2022", "configurePreset": "vs2022", "configuration": "Release" }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "vs",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "release-vs2022",
+      "configurePreset": "vs2022",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
