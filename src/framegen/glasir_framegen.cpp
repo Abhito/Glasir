@@ -1157,6 +1157,18 @@ public:
     bool ready() const { return !broken_ && source_ok(); }
     void set_enabled(bool on);
     void set_fast(bool fast);
+    glasir::overlay::FramegenStatus status() const {
+        glasir::overlay::FramegenStatus s;
+        const double now = qpc_seconds();
+        if (now < paused_until_) {
+            s.kind = s.Paused;
+            s.seconds_left = paused_until_ - now;
+        } else if (interval_ > 0 && max_hz_ > 0 && 2.0 / interval_ > max_hz_ * 1.05) {
+            s.kind = s.TooFast;
+            s.display_hz = max_hz_;
+        }
+        return s;
+    }
     void rates(double &source, double &real, double &generated) const {
         source = source_interval_ > 0 ? 1.0 / source_interval_ : 0;
         real = real_fps_;
@@ -1307,6 +1319,7 @@ private:
     LONG64 last_dropped_ = -1;
     double drop_times_[2] = {-1e9, -1e9};
     double paused_until_ = 0, backoff_ = 5.0, settle_until_ = 0;
+    int max_hz_ = 0;  // the most the display shows, as last read (for the menu)
 
     bool broken_ = false;
     double real_fps_ = 0, generated_fps_ = 0;  // over the last stats window, for the menu
@@ -1606,6 +1619,7 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
         next_hz_try_ = now + 1.0;
     }
     const int max_hz = g_settings.max_output_hz > 0 ? g_settings.max_output_hz : (hz_ > 0 ? hz_ : 60);
+    max_hz_ = max_hz;
 
     const int cur = prev_ == 0 ? 1 : 0;
     context_->CopyResource(frames_[cur].Get(), back_buffer.Get());
@@ -1883,6 +1897,7 @@ void set_menu_host() {
     host.framegen_fast = [] { return g_settings.fast; };
     host.set_framegen_fast = [](bool fast) { g_gen.set_fast(fast); };
     host.rates = [](double &source, double &real, double &generated) { g_gen.rates(source, real, generated); };
+    host.framegen_status = [] { return g_gen.status(); };
     host.mpv_pipe = g_settings.mpv_pipe;
     glasir::overlay::set_host(host);
 }

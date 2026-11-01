@@ -17,6 +17,13 @@
 
 namespace glasir::overlay {
 
+// Why frame generation is not doubling the frame rate just now, if it is not.
+struct FramegenStatus {
+    enum Kind { Running, Paused, TooFast } kind = Running;
+    double seconds_left = 0;  // Paused: until it tries again
+    int display_hz = 0;       // TooFast: the most the display shows
+};
+
 // What the add-on around the menu does (frame generation).
 struct Host {
     bool (*framegen_ready)() = nullptr;  // it can run (Glasir's dedup link is there, it did not fail)
@@ -27,6 +34,7 @@ struct Host {
     // Frames per second over the last seconds: from the source, real and
     // generated as presented.
     void (*rates)(double &source, double &real, double &generated) = nullptr;
+    FramegenStatus (*framegen_status)() = nullptr;
     std::string mpv_pipe = "glasir";  // mpv's IPC pipe name
 };
 void set_host(const Host &host);

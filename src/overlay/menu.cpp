@@ -63,6 +63,13 @@ void note(const char *text) {
     ImGui::PopStyleColor();
 }
 
+// A note that matters now (gold).
+void warn(const char *text) {
+    ImGui::PushStyleColor(ImGuiCol_Text, kGold);
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopStyleColor();
+}
+
 // A labelled slider across the panel; true when moved.
 // Left and Right move it by step while it is highlighted (no need to press
 // Enter on it first, as Dear ImGui would want).
@@ -152,6 +159,20 @@ void picture(const MenuFrame &f) {
             save(f, "framegen", "quality", "fast");
         }
         ImGui::Unindent();
+        if (h.framegen_status) {
+            const FramegenStatus st = h.framegen_status();
+            char text[200];
+            if (st.kind == FramegenStatus::Paused) {
+                std::snprintf(text, sizeof(text),
+                              "Paused, back in %.0f s: the GPU could not keep up (mpv dropped frames). "
+                              "Fast quality or a lighter DLSS 5 setting leaves it more room.",
+                              std::ceil(st.seconds_left));
+                warn(text);
+            } else if (st.kind == FramegenStatus::TooFast) {
+                std::snprintf(text, sizeof(text), "Not doubling: the display shows at most %d Hz.", st.display_hz);
+                note(text);
+            }
+        }
     }
     if (!ready) {
         ImGui::EndDisabled();
