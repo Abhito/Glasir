@@ -674,18 +674,29 @@ int run(const Args &args, bool &stuck) {
             mpv.close_stdin();
             mpv.stop(plan.ipc_pipe, src.raw_input ? 1000 : 2000);
 
-            // Stop reading. Shutting the source down cancels a read the
-            // driver has not finished; a raw ReadFile is cancelled until the
-            // thread is out.
+            // Stop reading. A raw ReadFile is cancelled until the thread is
+            // out. A card read is ended by flushing the reader (that returns
+            // a waiting ReadSample at once; shutting the source down does
+            // not while frames flow). The flush runs on its own thread so a
+            // driver that never answers cannot hold Glasir; shutting the
+            // source down is the last try.
             slot.stop();
             HANDLE thread = reader.native_handle();
             if (src.raw_input) {
                 for (int i = 0; i < 60 && WaitForSingleObject(thread, 50) == WAIT_TIMEOUT; ++i)
                     CancelSynchronousIo(thread);
-            } else if (src.source) {
-                src.source->Shutdown();
+            } else if (src.reader) {
+                std::thread([r = src.reader] {
+                    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                    r->Flush(static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS));
+                    if (SUCCEEDED(com)) CoUninitialize();
+                }).detach();
+                if (WaitForSingleObject(thread, 3000) == WAIT_TIMEOUT && src.source) {
+                    log(L"the capture thread did not stop after a flush: shutting the source down");
+                    src.source->Shutdown();
+                }
             }
-            if (WaitForSingleObject(thread, 3000) == WAIT_TIMEOUT) {
+            if (WaitForSingleObject(thread, 2000) == WAIT_TIMEOUT) {
                 // The driver will not give the read back. Leave the thread
                 // (it holds what it uses); wWinMain ends the process.
                 log(L"the capture thread did not end; Glasir ends without waiting for it");

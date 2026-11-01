@@ -332,7 +332,7 @@ DWORD MpvProcess::exit_code() const {
 }
 
 void MpvProcess::stop(const std::wstring &pipe, DWORD grace_ms) {
-    if (exited()) return;
+    if (exited(200)) return;  // already closing (its window was closed)
     if (send(pipe, ipc_command({L"quit"}), 500) && exited(grace_ms)) return;
     TerminateJobObject(job_, 1);
     exited(2000);
