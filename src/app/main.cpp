@@ -45,6 +45,7 @@
 
 #include "../common/framegen_link.h"
 #include "audio_endpoint.h"
+#include "backdrop.h"
 #include "capture.h"
 #include "components.h"
 #include "devices.h"
@@ -745,6 +746,14 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     if (!mpv.start(join_command_line(plan.mpv_exe, mpv_arguments(plan, s)), plan.raw, error)) {
         report(error);
         return 1;
+    }
+    // Full screen on a screen of another shape than the picture: mpv's
+    // window takes the picture only, black around it (backdrop.h).
+    Backdrop backdrop;
+    if (s.borderless) {
+        const UINT32 width = plan.raw ? plan.layout.width : (plan.dshow_mode ? plan.dshow_mode->width : s.width);
+        const UINT32 height = plan.raw ? plan.layout.height : (plan.dshow_mode ? plan.dshow_mode->height : s.height);
+        if (width && height) backdrop.start(mpv.pid(), width, height);
     }
     int rc = 0;
     MpvWatch changes;

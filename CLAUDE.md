@@ -35,6 +35,13 @@
   The launcher can be driven without focus by posting WM_KEYDOWN/WM_KEYUP
   (ImGui keyboard navigation: arrows, Space); posted mouse clicks are not
   reliable, as Windows sends WM_MOUSELEAVE when the real cursor is elsewhere.
+- Borderless full screen on a screen of another shape (the owner's is
+  3440x1440) sizes mpv's window to the picture and puts a black window of
+  Glasir's behind it (`src/app/backdrop.cpp`), so DLSS 5 and frame gen skip
+  the bars. Keep mpv a top-level window: PresentMon showed a child window
+  (`--wid`) loses VRR, while the boxed top-level window keeps independent
+  flip and VRR. Check presentation changes with PresentMon
+  (`MPV-SW-Capture	ools\presentmon`).
 - Git Bash heredocs collapse `\\` to `\` (e.g. `\\.\pipe\...`): write
   scripts with the Write tool, not `cat <<EOF`.
 - Licences: MIT everywhere except `src/framegen/` (MPL-2.0). Every source

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "backdrop.h"
 #include "components.h"
 #include "devices.h"
 #include "json.h"
@@ -357,5 +358,22 @@ int main() {
         expect(!watch.changed("user-data/glasir/audio-delay"), "watch: changed and back is no change");
     }
     std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
+    {
+        // Full screen: where the picture goes on the monitor (backdrop.h).
+        auto same = [](const RECT &r, LONG l, LONG t, LONG rr, LONG b) {
+            return r.left == l && r.top == t && r.right == rr && r.bottom == b;
+        };
+        expect(same(fit_picture(RECT{0, 0, 3440, 1440}, 1920, 1080), 440, 0, 3000, 1440),
+               "16:9 on 3440x1440: 2560x1440 in the middle");
+        expect(same(fit_picture(RECT{0, 0, 1920, 1200}, 3840, 2160), 0, 60, 1920, 1140),
+               "16:9 on 16:10: bars above and below");
+        expect(same(fit_picture(RECT{0, 0, 2560, 1440}, 1920, 1080), 0, 0, 2560, 1440),
+               "16:9 on 16:9: the whole screen");
+        expect(same(fit_picture(RECT{-2560, 100, 0, 1540}, 1280, 720), -2560, 100, 0, 1540),
+               "16:9 on a 16:9 screen left of the main one: the whole screen");
+        expect(same(fit_picture(RECT{0, 0, 1366, 768}, 1920, 1080), 0, 0, 1366, 768),
+               "1366x768 is 16:9 but for rounding: the whole screen");
+        expect(same(fit_picture(RECT{0, 0, 3440, 1440}, 0, 0), 0, 0, 3440, 1440), "no picture size: the whole screen");
+    }
     return g_failures ? 1 : 0;
 }

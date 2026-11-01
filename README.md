@@ -7,7 +7,8 @@ latency and modern enhancements applied live:
 - **Frame generation** (30 → 60, 60 → 120 fps), motion-compensated, any GPU
 - **VRR / G-SYNC / FreeSync** pacing
 - **DLSS 5 neural rendering** (NVIDIA RTX 50 series)
-- **Upscaling** (FSR1 on any GPU, RTX Video Super Resolution on NVIDIA)
+- **Scaling** to your screen (mpv's own; FSR1 and RTX Video Super Resolution
+  are planned)
 - **HDR and SDR**, low-latency WASAPI audio with boost and delay
 
 > **Status: early development.** Glasir is being ported piece by piece from
@@ -57,6 +58,17 @@ what you change in the menu.
 The menu (`Tab`) is drawn after DLSS 5 and frame generation, on every frame
 that reaches the screen, so it stays sharp and answers at once. Keys and the
 mouse go to it while it is open.
+
+Full screen on a screen of another shape than the picture (a 16:9 console on
+an ultrawide) shows the picture as large as fits, black around it. DLSS 5 and
+frame generation work on the picture only, not on the black bars, which
+leaves the GPU more room (on 3440x1440, DLSS 5 takes about 40 % less time).
+The menu's "Full screen" and `f` switch to mpv's own full screen, over the
+whole screen.
+
+The picture is scaled to its place on the screen by mpv, before DLSS 5. A
+capture mode of the screen's height (2560x1440 on a 1440p screen) needs no
+scaling at all.
 
 | Key | |
 |---|---|

@@ -41,7 +41,8 @@ Keep / build:
 - DLSS 5 with neural rendering on/off.
 - Upscaling: mpv's built-in scaling + FSR1 (any GPU); RTX VSR on NVIDIA.
   DLSS / FSR upscaling later, enabled by compatibility.
-- Screenshots; window / full-screen controls.
+- Screenshots; window / full-screen controls. Full screen on another
+  screen shape boxes the picture (black bars not processed).
 - Our own update check with one-click self-update (GitHub releases).
 - Hidden "save bug report" (the F9 frame-gen captures + capture viewer).
 
