@@ -101,9 +101,10 @@ own file) shaders, ReShade API headers (BSD-3), ReShade.fxh (CC0).
 
 Each step tested against the real capture card before the next:
 
-1. Repo skeleton, build scripts, licences/notices.
+1. Repo skeleton, build scripts, licences/notices. *(done)*
 2. Capture (msc_hdr_capture: MF NV12/P010, dedup) + mpv launch, SDR and HDR,
-   DirectShow fallback.
+   DirectShow fallback. *(done: Glasir.exe replaces the two .bat launchers;
+   also YUY2/UYVY cards, automatic card and mode choice, glasir.ini)*
 3. Audio (msc_audio from z-er's source) + boost + delay.
 4. Frame generation add-on + VRR hold + send-repeats.
 5. DLSS 5 (Feeder + RenoDX-DLSS5) wiring.

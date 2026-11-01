@@ -50,10 +50,12 @@ console).
 ## Layout
 
 ```
-src/capture/    capture program (Media Foundation, dedup)      MIT
+src/capture/    finding cards, reading frames, dedup (library)  MIT
+src/app/        Glasir.exe: settings, starting mpv, frame pump  MIT
+src/common/     shared with the add-ons (frame gen link)        MIT
 src/audio/      WASAPI audio mpv plugin                        MIT
 src/framegen/   frame generation ReShade add-on + shaders      MPL-2.0
-src/launcher/   launcher and settings                          MIT
+tools/          developer scripts (fetch mpv, smoke tests)     MIT
 third_party/    vendored headers with their licences           (see there)
 tests/          build and unit tests                           MIT
 docs/           plan, guides, troubleshooting                  MIT

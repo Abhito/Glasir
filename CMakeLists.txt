@@ -16,7 +16,7 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "Glasir builds for 64-bit Windows only.")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 # Static CRT: the app folder must run without the VC++ redistributable.
@@ -38,7 +38,7 @@ add_library(glasir_mpv_client INTERFACE)
 target_include_directories(glasir_mpv_client SYSTEM INTERFACE third_party/mpv/include)
 
 # Components are added as they are ported (docs/PLAN.md, "Porting order").
-foreach(component IN ITEMS capture audio framegen launcher)
+foreach(component IN ITEMS capture app audio framegen)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/${component}/CMakeLists.txt")
         add_subdirectory(src/${component})
     endif()

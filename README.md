@@ -34,7 +34,26 @@ build.cmd vs2022    # Visual Studio 2022
 
 This configures, builds, runs the tests and puts the portable app folder in
 `out\Glasir`. Third-party programs (mpv, ReShade, DLSS 5 components) are not
-in the repo; the installer downloads them.
+in the repo; the installer downloads them. Until the installer exists:
+
+```
+powershell -ExecutionPolicy Bypass -File tools\fetch-mpv.ps1   # latest mpv into out\Glasir\engine
+out\Glasir\Glasir.exe --list    # the capture cards and their modes
+out\Glasir\Glasir.exe           # play; the first run writes out\Glasir\glasir.ini
+```
+
+`glasir.ini` picks the card, size, rate, SDR or HDR, dedup and the window
+mode; every key is explained in the file. In the player: double-click or
+`f` for full screen, `s` for a screenshot (in `Screenshots\`), `q` to quit.
+Logs are in `logs\`.
+
+Testing without a capture card (needs ffmpeg and Python):
+
+```
+python tools\smoke_raw.py                    # NV12, a 30 fps game captured at 60
+python tools\smoke_raw.py --format p010 --hdr
+python tools\probe.py --set video.mode=hdr   # with a real card, in a small window
+```
 
 ## Licence
 
