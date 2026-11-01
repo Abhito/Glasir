@@ -6,12 +6,19 @@ prints Glasir's log. For checking a real card or the DirectShow fallback.
     python tools/probe.py                                   # glasir.ini as it is
     python tools/probe.py --set video.mode=hdr
     python tools/probe.py --set capture.path=directshow
+    python tools/probe.py --grab 3                          # also save 3 frames as PNG
+
+--grab N saves N frames mpv decoded (before ReShade; HDR tone-mapped to a
+normal image by mpv) about 100 ms apart into %TEMP%\glasir_grabs\<time>\,
+for looking at what the card sends.
 """
 import json
 import os
 import subprocess
 import sys
 import time
+
+GRABS = os.path.join(os.environ.get('TEMP', '.'), 'glasir_grabs')
 
 APP = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'out', 'Glasir')
 PIPE = r'\\.\pipe\glasir'
@@ -43,8 +50,24 @@ def request(pipe, command, request_id):
                 return msg.get('data')
 
 
+def grab(pipe, count):
+    folder = os.path.join(GRABS, time.strftime('%Y%m%d-%H%M%S'))
+    os.makedirs(folder, exist_ok=True)
+    for i in range(count):
+        path = os.path.join(folder, f'frame{i + 1:02}.png')
+        request(pipe, ['screenshot-to-file', path, 'video'], 100 + i)
+        print('grabbed', path)
+        time.sleep(0.1)
+
+
 def main():
-    args = ['--no-dialogs', '--set', 'window.mode=windowed'] + sys.argv[1:]
+    argv = sys.argv[1:]
+    grabs = 0
+    if '--grab' in argv:
+        i = argv.index('--grab')
+        grabs = int(argv[i + 1])
+        del argv[i:i + 2]
+    args = ['--no-dialogs', '--set', 'window.mode=windowed'] + argv
     glasir = subprocess.Popen([os.path.join(APP, 'Glasir.exe')] + args)
     pipe = connect(process=glasir)
     if pipe:
@@ -57,6 +80,8 @@ def main():
             path = request(pipe, ['get_property', 'path'], 4)
             print(f"mpv: {path}: {out.get('w')}x{out.get('h')} {out.get('pixelformat')} {out.get('colormatrix')} "
                   f"{out.get('colorlevels')} {out.get('gamma')}, {(n1 - n0) / (t1 - t0):.1f} fps shown")
+            if grabs:
+                grab(pipe, grabs)
             request(pipe, ['quit'], 5)
         except (OSError, ValueError, TypeError) as e:
             print('mpv:', e)

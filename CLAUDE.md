@@ -12,7 +12,9 @@
   with real hardware.
 - End-to-end without a card: `python tools/smoke_raw.py [--format p010 --hdr]`
   (ffmpeg test pattern -> `Glasir.exe --input-raw -` -> mpv, checked over
-  IPC). With the card, in a small window: `python tools/probe.py [--set ...]`.
+  IPC). With the card, in a small window: `python tools/probe.py [--set ...]`;
+  `--grab N` saves N decoded frames (HDR tone-mapped) to `%TEMP%\glasir_grabs\`
+  so you can look at them (downscale before viewing: 2560x1440 PNGs).
   Both open a window for a few seconds. Glasir allows one instance; its IPC
   pipe is `\\.\pipe\glasir`.
 - Git Bash heredocs collapse `\\` to `\` (e.g. `\\.\pipe\...`): write
