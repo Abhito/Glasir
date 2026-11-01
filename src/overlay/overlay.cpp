@@ -77,6 +77,9 @@ bool init(ID3D11Device *device) {
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;  // nothing written into mpv's folder
     io.LogFilename = nullptr;
+#ifdef NDEBUG
+    io.ConfigDebugHighlightIdConflicts = false;  // a developer's warning, not for players
+#endif
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     // Segoe UI, which every Windows has (not shipped with Glasir).
     const std::string font = windows_font("segoeui.ttf");

@@ -103,9 +103,11 @@ struct ModeItem {
 
 std::string utf8(const std::wstring &s) { return narrow(s); }
 
+// 60 and 59.94 are different modes on most cards, so only a rate within a
+// hundredth of a whole number (144.001) is shown as that number.
 std::string fps_text(double fps) {
     const double r = std::round(fps);
-    return std::abs(fps - r) < 0.05 ? std::format("{:.0f}", r) : std::format("{:.2f}", fps);
+    return std::abs(fps - r) < 0.01 ? std::format("{:.0f}", r) : std::format("{:.2f}", fps);
 }
 
 std::string mode_text(UINT32 w, UINT32 h, double fps) { return std::format("{} x {}  \xC2\xB7  {} fps", w, h, fps_text(fps)); }
@@ -318,10 +320,19 @@ void draw(Screen &s) {
         const std::string current = c.device.empty() ? auto_label : utf8(c.device) + (directshow ? "  (DirectShow)" : "");
         if (ImGui::BeginCombo("##card", current.c_str())) {
             if (ImGui::Selectable(auto_label.c_str(), c.device.empty())) c.device.clear();
-            for (const auto &d : f->devices)
+            // Items are told apart by their place, not their text: two cards
+            // can share a name, and ImGui warns about matching IDs.
+            int id = 0;
+            for (const auto &d : f->devices) {
+                ImGui::PushID(id++);
                 if (ImGui::Selectable(utf8(d.name).c_str(), names_match(d.name, c.device))) c.device = d.name;
-            for (const auto &n : f->directshow_only)
+                ImGui::PopID();
+            }
+            for (const auto &n : f->directshow_only) {
+                ImGui::PushID(id++);
                 if (ImGui::Selectable((utf8(n) + "  (DirectShow)").c_str(), names_match(n, c.device))) c.device = n;
+                ImGui::PopID();
+            }
             ImGui::EndCombo();
         }
         if (directshow) dim("This card works only through DirectShow: no dedup, so no frame generation.");
@@ -347,13 +358,16 @@ void draw(Screen &s) {
         const std::string mode_label = c.width ? mode_text(c.width, c.height, c.fps) : auto_mode;
         if (ImGui::BeginCombo("##mode", mode_label.c_str())) {
             if (ImGui::Selectable(auto_mode.c_str(), c.width == 0)) c.width = c.height = 0, c.fps = 0;
+            int id = 0;
             for (const auto &m : modes) {
                 const bool on = m.width == c.width && m.height == c.height && std::abs(m.fps - c.fps) < 0.01;
+                ImGui::PushID(id++);
                 if (ImGui::Selectable(mode_text(m.width, m.height, m.fps).c_str(), on)) {
                     c.width = m.width;
                     c.height = m.height;
                     c.fps = m.fps;
                 }
+                ImGui::PopID();
             }
             ImGui::EndCombo();
         }
@@ -396,8 +410,12 @@ void draw(Screen &s) {
         const std::string current = c.audio_device.empty() ? own : utf8(c.audio_device);
         if (ImGui::BeginCombo("##audio", current.c_str())) {
             if (ImGui::Selectable(own.c_str(), c.audio_device.empty())) c.audio_device.clear();
-            for (const auto &a : f->audio)
+            int id = 0;
+            for (const auto &a : f->audio) {
+                ImGui::PushID(id++);
                 if (ImGui::Selectable(utf8(a.name).c_str(), a.name == c.audio_device)) c.audio_device = a.name;
+                ImGui::PopID();
+            }
             ImGui::EndCombo();
         }
     }
@@ -525,6 +543,9 @@ LauncherAction run_launcher(const std::wstring &settings_path, const std::wstrin
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
+#ifdef NDEBUG
+    io.ConfigDebugHighlightIdConflicts = false;  // a developer's warning, not for players
+#endif
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     const std::string font = windows_font("segoeui.ttf");
     if (font.empty() || !io.Fonts->AddFontFromFileTTF(font.c_str())) io.Fonts->AddFontDefault();
