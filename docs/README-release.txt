@@ -32,7 +32,7 @@ KEYS
   F8                       frame generation on/off
   F9                       save the frames around now for a bug report
   s                        screenshot (in Screenshots\)
-  q                        quit
+  q, Esc                   quit (Esc closes the menu first if it is open)
   Home                     ReShade's overlay (DLSS 5 and effect settings)
 
 DLSS 5 starts with its authors' default settings. To tune it, open

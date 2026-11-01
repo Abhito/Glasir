@@ -71,7 +71,7 @@ mouse go to it while it is open.
 | `F8` | frame generation on/off (this session; needs ReShade) |
 | `F9` | save the frames around now for a bug report (in `Captures\`) |
 | `s` | screenshot (in `Screenshots\`) |
-| `q` | quit |
+| `q`, `Esc` | quit (`Esc` closes the menu first when it is open) |
 | `Home` | ReShade's overlay |
 
 DLSS 5 starts with its authors' default settings; tuning it is up to you, in
