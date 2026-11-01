@@ -34,7 +34,7 @@ which adds `Signed-off-by: Your Name <you@example.com>`.
 ## What doesn't go in the repo
 
 - Third-party binaries (mpv, ffmpeg, ReShade, DLSS DLLs, add-ons). The
-  installer downloads them.
+  app downloads them on the user's PC (`src/app/components.cpp`).
 - Game footage or screenshots. Evaluation tools read captures from a local
   folder outside the repo.
 - Third-party source with an unclear licence.

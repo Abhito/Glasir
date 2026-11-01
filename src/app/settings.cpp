@@ -5,6 +5,7 @@
 #include <cwctype>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <sstream>
 #include <vector>
 
@@ -208,7 +209,7 @@ enabled = 1
 ; The audio input to use. Empty: the card's own (found automatically).
 device =
 ; Volume 0-100 and boost 100-400 (%). Keys: Up/Down volume, M mute,
-; Ctrl+Up/Down boost.
+; Ctrl+Up/Down boost. What you change while playing is kept here.
 volume = 100
 boost = 100
 ; Holds the sound back (ms) so it matches the picture; DLSS 5 and frame
@@ -268,6 +269,110 @@ bool load_settings(const std::wstring &path, Settings &s, std::wstring &error) {
                 break;
             }
         if (!apply(s, section, lower(trim(line.substr(0, eq))), trim(value), error)) return false;
+    }
+    return true;
+}
+
+std::string update_settings_text(const std::string &text, const std::vector<SettingValue> &values) {
+    // Lines without their ends; the file's own line end is kept.
+    const std::string eol = text.find("\r\n") != std::string::npos || text.find('\n') == std::string::npos ? "\r\n" : "\n";
+    std::vector<std::string> lines;
+    for (size_t at = 0; at < text.size();) {
+        size_t nl = text.find('\n', at);
+        if (nl == std::string::npos) nl = text.size();
+        std::string line = text.substr(at, nl - at);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(line);
+        at = nl + 1;
+    }
+    auto section_of = [](const std::string &line) -> std::optional<std::wstring> {
+        const std::wstring t = trim(widen(line));
+        if (t.size() < 2 || t.front() != L'[' || t.back() != L']') return std::nullopt;
+        return lower(trim(t.substr(1, t.size() - 2)));
+    };
+    auto key_of = [](const std::string &line) {
+        const std::wstring t = trim(widen(line));
+        if (t.empty() || t[0] == L';' || t[0] == L'#' || t[0] == L'[') return std::wstring();
+        const size_t eq = t.find(L'=');
+        return eq == std::wstring::npos ? std::wstring() : lower(trim(t.substr(0, eq)));
+    };
+
+    for (const SettingValue &v : values) {
+        const std::wstring section = lower(v.section), key = lower(v.key);
+        const std::string value = narrow(v.value);
+        std::wstring current;
+        bool in_section = false, done = false;
+        size_t section_end = std::string::npos;  // after the section's last setting
+        for (size_t i = 0; i < lines.size() && !done; ++i) {
+            if (const auto s = section_of(lines[i])) {
+                current = *s;
+                in_section = current == section;
+                if (in_section) section_end = i + 1;
+                continue;
+            }
+            if (!in_section || key_of(lines[i]).empty()) continue;
+            section_end = i + 1;
+            if (key_of(lines[i]) != key) continue;
+            // Keep "key = " as written and a comment after the value.
+            std::string &line = lines[i];
+            const size_t eq = line.find('=');
+            size_t start = eq + 1;
+            while (start < line.size() && (line[start] == ' ' || line[start] == '\t')) ++start;
+            size_t end = line.size();
+            for (size_t k = start; k < line.size(); ++k)
+                if ((line[k] == ';' || line[k] == '#') && (k == start || line[k - 1] == ' ' || line[k - 1] == '\t')) {
+                    end = k;
+                    while (end > start && (line[end - 1] == ' ' || line[end - 1] == '\t')) --end;
+                    break;
+                }
+            std::string prefix = line.substr(0, start);
+            if (prefix.back() == '=' && eq > 0 && line[eq - 1] == ' ') prefix += ' ';  // "device =" -> "device = x"
+            std::string tail = line.substr(end);
+            if (!tail.empty() && tail[0] != ' ' && tail[0] != '\t') tail = " " + tail;  // keeps it a comment
+            line = prefix + value + tail;
+            done = true;
+        }
+        if (done) continue;
+        const std::string entry = narrow(v.key) + " = " + value;
+        if (section_end != std::string::npos) {
+            lines.insert(lines.begin() + std::ptrdiff_t(section_end), entry);
+        } else {
+            if (!lines.empty() && !lines.back().empty()) lines.push_back("");
+            lines.push_back("[" + narrow(v.section) + "]");
+            lines.push_back(entry);
+        }
+    }
+    std::string out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        out += lines[i];
+        // The last line ends as it did (a file without a final newline stays so).
+        if (i + 1 < lines.size() || (!text.empty() && text.back() == '\n') || text.empty()) out += eol;
+    }
+    return out;
+}
+
+bool save_settings(const std::wstring &path, const std::vector<SettingValue> &values) {
+    std::string text;
+    {
+        std::ifstream in(path, std::ios::binary);
+        if (in) text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const bool bom = text.size() >= 3 && text.compare(0, 3, "\xEF\xBB\xBF") == 0;
+    const std::string updated = (bom ? "\xEF\xBB\xBF" : "") + update_settings_text(bom ? text.substr(3) : text, values);
+    if (updated == text) return true;
+    const std::wstring part = path + L".new";
+    {
+        std::ofstream out(part, std::ios::binary | std::ios::trunc);
+        out << updated;
+        if (!out) {
+            log(L"could not write {}", part);
+            return false;
+        }
+    }
+    if (!MoveFileExW(part.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        log(L"could not replace {} (error {})", path, GetLastError());
+        DeleteFileW(part.c_str());
+        return false;
     }
     return true;
 }

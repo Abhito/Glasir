@@ -8,6 +8,7 @@
 #include <sstream>
 #include <vector>
 
+#include "components.h"
 #include "log.h"
 
 namespace glasir {
@@ -82,12 +83,7 @@ constexpr char kDlss5Techniques[] = "Lumenite_Kernel@lumenite_Kernel.fx,DLSS5_Fe
 
 bool reshade_installed(const std::wstring &engine_dir) { return exists(engine_dir + L"\\dxgi.dll"); }
 
-bool dlss5_installed(const std::wstring &engine_dir) {
-    for (const wchar_t *file : {L"\\dlss5-feed.addon64", L"\\renodx-dlss5.addon64", L"\\nvngx_dlssnr.dll",
-                                L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
-        if (!exists(engine_dir + file)) return false;
-    return true;
-}
+bool dlss5_installed(const std::wstring &engine_dir) { return component_installed(engine_dir, Component::Dlss5); }
 
 void write_reshade_config(const std::wstring &engine_dir, const Settings &s, bool dlss5) {
     const std::wstring ini = engine_dir + L"\\ReShade.ini";

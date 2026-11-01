@@ -1,7 +1,7 @@
 # Third-party source in this repo
 
 Only files whose licences allow it are kept here, unmodified, each with its
-licence. Binaries never go in the repo; the installer downloads them (see
+licence. Binaries never go in the repo; Glasir downloads them on the user's PC (see
 `docs/PLAN.md` and `THIRD-PARTY-NOTICES.md`).
 
 | Folder | What | Version / source | Licence |

@@ -11,8 +11,7 @@ latency and modern enhancements applied live:
 - **HDR and SDR**, low-latency WASAPI audio with boost and delay
 
 > **Status: early development.** Glasir is being ported piece by piece from
-> a working prototype. Nothing is ready to use yet. The plan for v1 is in
-> [docs/PLAN.md](docs/PLAN.md).
+> a working prototype. The plan for v1 is in [docs/PLAN.md](docs/PLAN.md).
 
 ## Requirements (planned for v1)
 
@@ -22,32 +21,32 @@ latency and modern enhancements applied live:
 - Any DirectX 11 GPU for frame generation and upscaling; NVIDIA RTX 50
   series for DLSS 5
 
-## Building
+## Installing
 
-Needs Visual Studio 2026 (or 2022) with the "Desktop development with C++"
-workload, and CMake 3.25 or newer.
+1. Unzip `Glasir-x.y.z.zip` into a folder you can write to (for example
+   `C:\Games\Glasir`; not Program Files, because Glasir keeps its settings,
+   logs and screenshots in its own folder).
+2. Start `Glasir.exe`. The first time, it asks to download the programs it
+   runs on, each from where its authors publish it:
+   [mpv](https://github.com/zhongfly/mpv-winbuild),
+   [ReShade](https://reshade.me) with add-on support, and DLSS 5 on an
+   NVIDIA RTX 50 series GPU (DLSS5-Feeder, RenoDX-DLSS5 and NVIDIA's neural
+   rendering from [RHI's mirror](https://github.com/RankFTW/rhi-repo),
+   [NVIDIA DLSS](https://github.com/NVIDIA/DLSS), LumeniteFX). Downloads are
+   checked against their published SHA-256 hashes, and NVIDIA's DLL against
+   NVIDIA's signature.
+3. Later, `Glasir.exe --setup` downloads the newest versions.
+   `engine\components.ini` says which are installed.
 
-```
-build.cmd           # Visual Studio 2026
-build.cmd vs2022    # Visual Studio 2022
-```
+To remove Glasir, delete its folder.
 
-This configures, builds, runs the tests and puts the portable app folder in
-`out\Glasir`. Third-party programs (mpv, ReShade, DLSS 5 components) are not
-in the repo; the installer downloads them. Until the installer exists:
-
-```
-powershell -ExecutionPolicy Bypass -File tools\fetch-mpv.ps1       # latest mpv into out\Glasir\engine
-powershell -ExecutionPolicy Bypass -File tools\fetch-reshade.ps1   # ReShade (add-on build) from reshade.me
-powershell -ExecutionPolicy Bypass -File tools\fetch-dlss5.ps1     # DLSS 5 components (about 250 MB)
-out\Glasir\Glasir.exe --list    # the capture cards and their modes
-out\Glasir\Glasir.exe           # play; the first run writes out\Glasir\glasir.ini
-```
+## Using it
 
 `glasir.ini` picks the card, size, rate, SDR or HDR, dedup, frame
 generation, DLSS 5, sound and the window mode; every key is explained in the
 file. The card's own audio input is found automatically. DLSS 5 turns itself
-on with an NVIDIA RTX 50 series GPU (`[dlss5] enabled = auto`).
+on with an NVIDIA RTX 50 series GPU (`[dlss5] enabled = auto`). Volume, boost
+and audio delay you change while playing are kept in `glasir.ini`.
 
 | Key | |
 |---|---|
@@ -57,14 +56,42 @@ on with an NVIDIA RTX 50 series GPU (`[dlss5] enabled = auto`).
 | `Ctrl+Up` / `Ctrl+Down` | audio boost (up to 400 %) |
 | `[` / `]` | audio delay -/+ 10 ms (lip sync) |
 | `Ctrl+r` | restart the sound (after changing the output device) |
-| `F6` | DLSS 5 neural rendering on/off |
-| `F8` | frame generation on/off (needs ReShade) |
+| `F6` | DLSS 5 neural rendering on/off (this session) |
+| `F8` | frame generation on/off (this session; needs ReShade) |
 | `F9` | save the frames around now for a bug report (in `Captures\`) |
 | `s` | screenshot (in `Screenshots\`) |
 | `q` | quit |
+| `Home` | ReShade's overlay |
+
+DLSS 5 starts with its authors' default settings; tuning it is up to you, in
+ReShade's overlay (`Home`): RenoDX-DLSS5 on the Add-ons tab, DLSS5_Feed on
+the Home tab (untick "Performance Mode" to edit it). Your changes stay in
+`engine\ReShade.ini` and `engine\ReShadePreset.ini`; Glasir only switches
+DLSS 5 on or off there.
 
 Logs are in `logs\` (`glasir.log`, `audio.log`); ReShade, frame
 generation and DLSS 5 log to `engine\ReShade.log` (and `engine\dlss5-feed.log`).
+
+## Building
+
+Needs Visual Studio 2026 (or 2022) with the "Desktop development with C++"
+workload, and CMake 3.25 or newer.
+
+```
+build.cmd                # Visual Studio 2026
+build.cmd vs2022         # Visual Studio 2022
+build.cmd package        # ... and the release zip, out\Glasir-x.y.z.zip
+```
+
+This configures, builds, runs the tests and puts the portable app folder in
+`out\Glasir`. Third-party programs are not in the repo:
+
+```
+out\Glasir\Glasir.exe --setup --no-dialogs   # mpv, ReShade (and DLSS 5 on RTX 50) into out\Glasir\engine
+out\Glasir\Glasir.exe --list                 # the capture cards and their modes
+```
+
+`--setup --no-dialogs --components mpv,reshade,dlss5` picks what to download.
 
 Testing without a capture card (needs ffmpeg and Python):
 

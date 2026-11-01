@@ -520,7 +520,7 @@ in the first eight, before step 5: 1.18 mean, 1.55 worst. All 64 pairs now
 
 - `build.cmd` (repo root) builds the add-on with the rest of Glasir and
   installs it into `out\Glasir\engine`; the shaders are compiled with fxc
-  into headers (`shaders.cmake` lists them). `tools\fetch-reshade.ps1` puts
+  into headers (`shaders.cmake` lists them). `Glasir.exe --setup` puts
   ReShade (add-on build, from reshade.me) next to mpv.exe.
 - Settings: `glasir.ini` `[framegen]` (on/off, quality, every frame while
   off). Glasir writes them into `engine\ReShade.ini`, section

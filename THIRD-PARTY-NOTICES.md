@@ -82,10 +82,12 @@ Added as each part is ported (docs/PLAN.md):
 - DLSS5-Feeder (MIT, Jean-Laurent Rouzies; portions NIGos, MIT) if shipped.
 -->
 
-## Downloaded by the installer, not included
+## Downloaded by Glasir, not included
 
-The installer downloads these from their official sources on your PC. Glasir
-does not distribute them; their licences apply as published by their authors.
+On its first start (and with `Glasir.exe --setup`), Glasir downloads these
+from their official sources on your PC, after asking. Glasir does not
+distribute them; their licences apply as published by their authors.
+`engine\components.ini` records which versions were installed, from where.
 
 | Component | Source | Licence |
 |---|---|---|

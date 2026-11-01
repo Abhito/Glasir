@@ -64,7 +64,7 @@ beyond what DLSS5_Feed needs.
 ## Third-party components
 
 Nothing third-party that is restricted goes into the repo or our release zip.
-The installer fetches on the user's PC:
+Glasir's setup (in Glasir.exe) fetches on the user's PC:
 
 | Component | Source |
 |---|---|
@@ -109,8 +109,14 @@ Each step tested against the real capture card before the next:
    based on z-er's public source; finds the card's audio input by itself)*
 4. Frame generation add-on + VRR hold + send-repeats. *(done: src/framegen, MPL-2.0;
    same shaders and scores as the prototype; VRR measurement tools not ported yet)*
-5. DLSS 5 (Feeder + RenoDX-DLSS5) wiring. *(done: tools/fetch-dlss5.ps1, [dlss5]
+5. DLSS 5 (Feeder + RenoDX-DLSS5) wiring. *(done: download, [dlss5]
    auto/on/off with RTX 50 detection; nvngx_dlss.dll from NVIDIA's own SDK works)*
-6. Installer (component downloads) + settings file.
+6. Installer (component downloads) + settings file. *(done: Glasir.exe is its own
+   installer: release zip, first start asks and downloads mpv, ReShade and DLSS 5
+   (`--setup` to update); volume, boost and delay changed while playing are kept
+   in glasir.ini. mpv's options go on its command line from glasir.ini; mpv.conf
+   and input.conf are Glasir's own files. F6/F8 stay session toggles; DLSS 5
+   tuning in the ReShade overlay stays in ReShade.ini, starting from its
+   authors' defaults)*
 7. Launcher + in-game menu (after-effects overlay prototype first).
 8. Update check / self-update, bug-report capture, docs.

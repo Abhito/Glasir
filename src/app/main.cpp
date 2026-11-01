@@ -13,10 +13,16 @@
 //   Glasir.exe --input-raw FILE|- [--raw-format nv12|p010|yuy2|uyvy] --set capture.width=W ...
 //   Glasir.exe --list
 //   Glasir.exe --version
+//   Glasir.exe --setup [--components mpv,reshade,dlss5] [--no-dialogs]
 //
 // --input-raw reads tightly packed frames from a file or standard input
 // instead of the card (capture.width, capture.height and capture.fps must be
 // set), for testing the same path without one.
+//
+// --setup downloads (or updates) the programs Glasir runs on: it asks which,
+// or with --no-dialogs takes --components (default: mpv, ReShade, and DLSS 5
+// if it is there already or the GPU is an RTX 50). The first start does the
+// same when mpv or ReShade is missing.
 
 #include <windows.h>
 #include <shellapi.h>
@@ -36,6 +42,7 @@
 #include "../common/framegen_link.h"
 #include "audio_endpoint.h"
 #include "capture.h"
+#include "components.h"
 #include "devices.h"
 #include "glasir_version.h"
 #include "log.h"
@@ -43,6 +50,7 @@
 #include "gpu.h"
 #include "reshade_config.h"
 #include "settings.h"
+#include "setup_ui.h"
 
 using namespace glasir;
 using Microsoft::WRL::ComPtr;
@@ -59,8 +67,10 @@ struct Args {
     std::vector<std::wstring> overrides;
     std::wstring input_raw;
     std::wstring raw_format;
+    std::wstring components;  // --setup: what to download, comma-separated
     bool list = false;
     bool version = false;
+    bool setup = false;
     bool dialogs = true;
 };
 
@@ -114,6 +124,10 @@ bool parse_args(Args &a, std::wstring &error) {
             a.list = true;
         } else if (arg == L"--version") {
             a.version = true;
+        } else if (arg == L"--setup") {
+            a.setup = true;
+        } else if (arg == L"--components") {
+            value(a.components);
         } else if (arg == L"--no-dialogs") {
             a.dialogs = false;
         } else if (arg == L"--settings") {
@@ -537,6 +551,93 @@ std::wstring capture_end_error(HRESULT ended, const std::wstring &device) {
            L"). Check its cable and that the console is on.";
 }
 
+enum class SetupResult { Play, Stop, Failed };
+
+// Downloads what Glasir runs on: when mpv or ReShade is missing, or with
+// --setup (which then ends Glasir). Play: go on (with what is there).
+SetupResult setup(const Args &args, const std::wstring &dir, const std::wstring &engine) {
+    const bool need = !component_installed(engine, Component::Mpv) || !component_installed(engine, Component::ReShade);
+    if (!args.setup && !need) return SetupResult::Play;
+    const bool dlss5_default = component_installed(engine, Component::Dlss5) || is_rtx50(display_gpu());
+    std::vector<Component> which;
+    if (!args.dialogs) {
+        // Nothing is downloaded unasked when no one can be asked.
+        if (!args.setup) return SetupResult::Play;
+        if (args.components.empty()) {
+            which = {Component::Mpv, Component::ReShade};
+            if (dlss5_default) which.push_back(Component::Dlss5);
+        }
+        for (size_t at = 0; at < args.components.size();) {
+            size_t comma = args.components.find(L',', at);
+            if (comma == std::wstring::npos) comma = args.components.size();
+            const std::wstring name = args.components.substr(at, comma - at);
+            at = comma + 1;
+            if (name == L"mpv") which.push_back(Component::Mpv);
+            else if (name == L"reshade") which.push_back(Component::ReShade);
+            else if (name == L"dlss5") which.push_back(Component::Dlss5);
+            else {
+                report(L"Unknown component " + name + L" (mpv, reshade or dlss5).");
+                return SetupResult::Failed;
+            }
+        }
+    } else {
+        SetupChoice choice;
+        choice.first_run = !args.setup;
+        choice.dlss5_checked = dlss5_default;
+        choice.notices_file = dir + L"\\THIRD-PARTY-NOTICES.md";
+        const auto chosen = ask_setup(choice);
+        if (!chosen) {
+            log(L"setup: not now");
+            return args.setup || !component_installed(engine, Component::Mpv) ? SetupResult::Stop : SetupResult::Play;
+        }
+        which = *chosen;
+    }
+
+    std::wstring error;
+    if (!run_setup(engine, which, args.dialogs, error)) {
+        if (error != L"cancelled") {
+            const std::wstring text = L"Glasir could not download everything: " + error +
+                                      L".\n\nStart Glasir again to try again. logs\\glasir.log has the details.";
+            // Shown now: nothing is held yet but the one-instance lock.
+            if (args.dialogs) show(text, MB_ICONERROR);
+            else report(text);
+        }
+        if (args.setup) return error == L"cancelled" ? SetupResult::Stop : SetupResult::Failed;
+        return component_installed(engine, Component::Mpv) ? SetupResult::Play : SetupResult::Stop;
+    }
+    if (args.setup) {
+        if (args.dialogs) {
+            show(L"Glasir is set up. Start it again to play.", MB_ICONINFORMATION);
+        } else {
+            std::wstring text = L"Installed in " + engine + L":\n";
+            for (const auto &line : installed_versions(engine)) text += L"  " + line + L"\n";
+            print(text, false);
+        }
+        return SetupResult::Stop;
+    }
+    return SetupResult::Play;
+}
+
+// What the user changed while playing (volume, boost, delay) is kept in
+// glasir.ini for next time. Mute is not: a muted start would be a surprise.
+void keep_changes(const MpvWatch &watch, const std::wstring &settings_path) {
+    std::vector<SettingValue> values;
+    auto keep = [&](const char *property, const wchar_t *key, long lo, long hi) {
+        const auto v = watch.changed(property);
+        if (!v) return;
+        char *end = nullptr;
+        const double d = std::strtod(v->c_str(), &end);
+        if (end == v->c_str()) return;
+        const long n = std::clamp(std::lround(d), lo, hi);
+        values.push_back({L"audio", key, std::to_wstring(n)});
+        log(L"keeping audio.{} = {} in {}", key, n, settings_path);
+    };
+    keep("volume", L"volume", 0, 100);
+    keep("user-data/glasir/audio-boost", L"boost", 100, 400);
+    keep("user-data/glasir/audio-delay", L"delay_ms", 0, 1000);
+    if (!values.empty()) save_settings(settings_path, values);
+}
+
 // Plays until mpv closes. Returns the exit code; errors go to report().
 // Sets stuck if the capture thread would not end (see wWinMain).
 int run(const Args &args, bool &stuck) {
@@ -544,6 +645,28 @@ int run(const Args &args, bool &stuck) {
     CreateDirectoryW((dir + L"\\logs").c_str(), nullptr);
     log_open(dir + L"\\logs\\glasir.log");
     log(L"{} {} ({})", widen(GLASIR_NAME), widen(GLASIR_VERSION), widen(GLASIR_GIT_DESCRIBE));
+
+    // One Glasir at a time, before anything is read or written: one still
+    // closing writes glasir.ini and ReShade.ini as it goes, and setup may
+    // replace mpv.exe.
+    HANDLE quit_event = CreateEventW(nullptr, TRUE, FALSE, kQuitEvent);
+    Instance instance(quit_event);
+    struct CloseEvent {
+        HANDLE h;
+        ~CloseEvent() { CloseHandle(h); }
+    } close_event{quit_event};
+    if (!instance.take()) {
+        report(L"Another Glasir is running and did not close.");
+        return 1;
+    }
+
+    const std::wstring engine = dir + L"\\engine";
+    switch (setup(args, dir, engine)) {
+    case SetupResult::Play: break;
+    case SetupResult::Stop: return 0;
+    case SetupResult::Failed: return 1;
+    }
+    for (const auto &line : installed_versions(engine)) log(L"{}", line);
 
     Settings s;
     std::wstring error;
@@ -558,7 +681,6 @@ int run(const Args &args, bool &stuck) {
             return 2;
         }
 
-    const std::wstring engine = dir + L"\\engine";
     MpvPlan plan;
     plan.mpv_exe = engine + L"\\mpv.exe";
     plan.config_dir = engine + L"\\portable_config";
@@ -566,7 +688,8 @@ int run(const Args &args, bool &stuck) {
     plan.ipc_pipe = kIpcPipe;
     if (s.mpv_log) plan.log_file = dir + L"\\logs\\mpv.log";
     if (!file_exists(plan.mpv_exe)) {
-        report(L"mpv.exe is missing from " + engine + L". Run the Glasir installer to download it.");
+        report(L"mpv.exe is missing from " + engine +
+               L". Start Glasir without --no-dialogs, or run \"Glasir.exe --setup\", to download it.");
         return 1;
     }
     CreateDirectoryW(plan.screenshot_dir.c_str(), nullptr);
@@ -581,7 +704,7 @@ int run(const Args &args, bool &stuck) {
             s.framegen && !s.dedup ? L" but needs dedup = 1: it stays off" : L"");
         std::wstring why;
         if (!installed)
-            why = L" (its files are not in engine; run the installer)";
+            why = L" (not downloaded; \"Glasir.exe --setup\" offers it)";
         else if (s.dlss5 == Settings::Dlss5::Off)
             why = L" (glasir.ini)";
         else if (!dlss5)
@@ -591,21 +714,10 @@ int run(const Args &args, bool &stuck) {
         log(L"ReShade is not in {}: no frame generation or DLSS 5", engine);
     }
 
-    HANDLE quit_event = CreateEventW(nullptr, TRUE, FALSE, kQuitEvent);
-    Instance instance(quit_event);
-    if (!instance.take()) {
-        report(L"Another Glasir is running and did not close.");
-        CloseHandle(quit_event);
-        return 1;
-    }
-
     // Declared in this order so they end in reverse: the watcher before mpv,
     // mpv before the card, the card before the one-instance lock.
     Source src;
-    if (!open_source(args, s, src)) {
-        CloseHandle(quit_event);
-        return 1;
-    }
+    if (!open_source(args, s, src)) return 1;
     plan.raw = src.raw;
     plan.layout = src.layout;
     plan.fps = src.fps;
@@ -617,10 +729,10 @@ int run(const Args &args, bool &stuck) {
     MpvProcess mpv;
     if (!mpv.start(join_command_line(plan.mpv_exe, mpv_arguments(plan, s)), plan.raw, error)) {
         report(error);
-        CloseHandle(quit_event);
         return 1;
     }
     int rc = 0;
+    MpvWatch changes;
     {
         QuitWatcher watcher(quit_event, mpv);
         const std::wstring target = mpv_load_target(plan);
@@ -650,6 +762,11 @@ int run(const Args &args, bool &stuck) {
                                     : std::wstring(L"mpv did not answer while starting."));
             rc = 1;
         }
+
+        // Follows what the user changes while playing.
+        if (loaded && !changes.start(mpv, plan.ipc_pipe,
+                                     {"volume", "user-data/glasir/audio-boost", "user-data/glasir/audio-delay"}))
+            log(L"could not follow mpv's volume: changes while playing are not kept");
 
         if (!loaded) {
             mpv.stop(plan.ipc_pipe, 1000);
@@ -771,7 +888,8 @@ int run(const Args &args, bool &stuck) {
         }
     }
     log(L"mpv exited (code {})", mpv.exit_code());
-    CloseHandle(quit_event);
+    changes.stop();
+    keep_changes(changes, settings_path);
     return rc;
 }
 
@@ -805,7 +923,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         print(device_list_text(), args.dialogs);
     else
         rc = run(args, stuck);
-    if (!g_error.empty() && args.dialogs) show(g_error, MB_ICONERROR);
+    if (!g_error.empty()) {
+        if (args.dialogs) show(g_error, MB_ICONERROR);
+        else print(L"Glasir: " + g_error + L"\n", false);  // to a console or pipe, if there is one
+    }
     if (stuck) {
         // A driver read that never returned: shutting Media Foundation down
         // could wait on it too. Everything else is already released.

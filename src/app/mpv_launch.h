@@ -3,8 +3,10 @@
 #pragma once
 #include <windows.h>
 
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "capture.h"
@@ -81,6 +83,38 @@ private:
     PROCESS_INFORMATION pi_{};
     HANDLE job_ = nullptr;
     HANDLE stdin_ = nullptr;
+    friend class MpvWatch;
+};
+
+// Follows mpv properties over IPC while mpv runs: what the user changes while
+// playing (volume, the audio plugin's boost and delay), to keep for next time.
+class MpvWatch {
+public:
+    MpvWatch() = default;
+    MpvWatch(const MpvWatch &) = delete;
+    MpvWatch &operator=(const MpvWatch &) = delete;
+    ~MpvWatch() { stop(); }
+
+    bool start(const MpvProcess &mpv, const std::wstring &pipe, const std::vector<std::string> &properties);
+    // Ends the watch (mpv closing ends it too).
+    void stop();
+    // The property's last value if it changed since the first one seen
+    // (numbers as written by mpv, strings as they are).
+    std::optional<std::string> changed(const std::string &property) const;
+
+    // What start() does before it connects, and one IPC line: for the tests.
+    void track(const std::vector<std::string> &properties);
+    void on_line(const std::string &line);
+
+private:
+    struct Value {
+        std::optional<std::string> first, last;
+    };
+    mutable std::mutex m_;
+    std::vector<std::string> names_;
+    std::vector<Value> values_;
+    HANDLE pipe_ = nullptr;
+    std::thread thread_;
 };
 
 }  // namespace glasir

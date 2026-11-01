@@ -7,7 +7,9 @@
   frame gen + capture + DLSS 5). That folder is the owner's daily app: read
   from it, never modify it.
 - Build and test: `build.cmd` (CMake presets, VS 2026; `build.cmd vs2022`).
-  Output: `out\Glasir`; `tools\fetch-mpv.ps1` puts mpv in `out\Glasir\engine`.
+  Output: `out\Glasir`. `out\Glasir\Glasir.exe --setup --no-dialogs` downloads
+  mpv, ReShade and DLSS 5 into `out\Glasir\engine` (`--components mpv,reshade,dlss5`).
+  `build.cmd package` also makes the release zip in `out\`.
   Only the owner's PC has a capture card; say what was and wasn't tested
   with real hardware.
 - End-to-end without a card: `python tools/smoke_raw.py [--format p010 --hdr]`

@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <string>
+#include <vector>
 
 namespace glasir {
 
@@ -53,5 +54,15 @@ bool apply_override(Settings &s, const std::wstring &assignment, std::wstring &e
 
 // The file written when there is none: every key at its default, explained.
 const char *default_settings_text();
+
+struct SettingValue {
+    std::wstring section, key, value;
+};
+// The text with these values set: an existing key keeps its line (spacing,
+// a comment after it), a missing one is added at the end of its section (the
+// section at the end of the file if there is none). Everything else stays.
+std::string update_settings_text(const std::string &text, const std::vector<SettingValue> &values);
+// update_settings_text on the file, which is replaced as a whole.
+bool save_settings(const std::wstring &path, const std::vector<SettingValue> &values);
 
 }  // namespace glasir

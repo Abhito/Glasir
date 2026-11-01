@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "components.h"
 #include "devices.h"
+#include "json.h"
 #include "mpv_launch.h"
 #include "reshade_config.h"
 #include "settings.h"
@@ -245,7 +247,7 @@ int main() {
         Settings s;
         expect(!dlss5_installed(engine), "DLSS 5 files missing: not installed");
         for (const wchar_t *f : {L"\\dlss5-feed.addon64", L"\\renodx-dlss5.addon64", L"\\nvngx_dlssnr.dll",
-                                 L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
+                                 L"\\nvngx_dlss.dll", L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
             touch(f, "x");
         expect(dlss5_installed(engine), "DLSS 5 files there: installed");
         write_reshade_config(engine, s, true);
@@ -270,9 +272,84 @@ int main() {
         expect(preset.rfind("Techniques=\r\n", 0) == 0 && preset.find("[x.fx]\r\nA=1") != std::string::npos,
                "DLSS 5 off: no effects, the preset's sections kept");
         for (const wchar_t *f : {L"\\ReShade.ini", L"\\ReShadePreset.ini", L"\\dlss5-feed.cfg", L"\\dlss5-feed.addon64",
-                                 L"\\renodx-dlss5.addon64", L"\\nvngx_dlssnr.dll",
+                                 L"\\renodx-dlss5.addon64", L"\\nvngx_dlssnr.dll", L"\\nvngx_dlss.dll",
                                  L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
             DeleteFileW((engine + f).c_str());
+    }
+    {
+        // GitHub's release answers.
+        const auto j = Json::parse(R"({"tag_name":"v1.2","assets":[{"name":"aé.zip","size":1234,)"
+                                   R"("digest":"sha256:ab","x":[1,-2.5e1,true,null,{}]}],"body":"line\nnext \"q\""})");
+        expect(j && j->str("tag_name") == "v1.2", "JSON: a string member");
+        const Json *assets = j ? j->get("assets") : nullptr;
+        expect(assets && assets->items().size() == 1 && assets->items()[0].str("name") == "a\xC3\xA9.zip",
+               "JSON: arrays, objects, \\u escapes to UTF-8");
+        expect(assets && assets->items()[0].get("size")->number() == 1234, "JSON: numbers");
+        expect(assets && assets->items()[0].get("x")->items()[1].number() == -25, "JSON: exponents");
+        expect(j && j->str("body") == "line\nnext \"q\"", "JSON: escapes");
+        expect(j && j->str("missing").empty() && !j->get("missing"), "JSON: a missing member");
+        expect(!Json::parse("{\"a\":1,}") && !Json::parse("[1 2]") && !Json::parse("{\"a\":1} x") &&
+                   !Json::parse("\"open"),
+               "JSON: broken text is refused");
+        expect(Json::parse("\"\\ud83d\\ude00\"")->string() == "\xF0\x9F\x98\x80", "JSON: surrogate pairs");
+
+        int v[3] = {};
+        expect(parse_release_tag(L"renodx-dlss5-1.10.2", L"renodx-dlss5", v) && v[0] == 1 && v[1] == 10 && v[2] == 2,
+               "release tag PREFIX-x.y.z");
+        expect(!parse_release_tag(L"renodx-dlss5-1.10.2-rc1", L"renodx-dlss5", v) &&
+                   !parse_release_tag(L"renodx-dlss5-fork-1.0.0", L"renodx-dlss5", v) &&
+                   !parse_release_tag(L"dlssnr-1.0.0", L"renodx-dlss5", v),
+               "release candidates, forks and other tags are not picked");
+    }
+    {
+        // What changed while playing goes back into glasir.ini, the rest kept.
+        const std::string before = "; top\r\n[audio]\r\n; volume\r\nvolume = 100\r\nboost=100 ; a note\r\n"
+                                   "device =\r\n\r\n[window]\r\nmode = borderless\r\n";
+        const std::string after = update_settings_text(
+            before, {{L"audio", L"volume", L"80"}, {L"audio", L"boost", L"150"}, {L"audio", L"device", L"X"},
+                     {L"audio", L"delay_ms", L"40"}, {L"debug", L"mpv_log", L"1"}});
+        expect(after == "; top\r\n[audio]\r\n; volume\r\nvolume = 80\r\nboost=150 ; a note\r\ndevice = X\r\n"
+                        "delay_ms = 40\r\n\r\n[window]\r\nmode = borderless\r\n\r\n[debug]\r\nmpv_log = 1\r\n",
+               "settings: values replaced in place, comments kept, missing keys added");
+        expect(update_settings_text("[AUDIO]\nVolume=5\n", {{L"audio", L"volume", L"6"}}) == "[AUDIO]\nVolume=6\n",
+               "settings: keys and sections match without case, LF kept");
+        expect(update_settings_text("[audio]\nvolume = ;x\n", {{L"audio", L"volume", L"6"}}) == "[audio]\nvolume = 6 ;x\n",
+               "settings: a comment right after = stays a comment");
+        expect(update_settings_text(default_settings_text(), {}) == default_settings_text(),
+               "settings: no values, no change");
+        Settings s;
+        std::wstring error;
+        wchar_t temp[MAX_PATH + 1] = {};
+        GetTempPathW(MAX_PATH + 1, temp);
+        const std::wstring path = std::wstring(temp) + L"glasir_test_settings.ini";
+        DeleteFileW(path.c_str());
+        load_settings(path, s, error);  // writes the defaults
+        expect(save_settings(path, {{L"audio", L"volume", L"35"}, {L"audio", L"delay_ms", L"120"}}),
+               "settings: saved");
+        Settings again;
+        expect(load_settings(path, again, error) && again.volume == 35 && again.audio_delay_ms == 120 &&
+                   again.boost == 100,
+               "settings: the saved values load back");
+        DeleteFileW(path.c_str());
+
+        MpvWatch watch;
+        watch.on_line(R"({"event":"property-change","id":1,"name":"volume","data":100.000000})");
+        expect(!watch.changed("volume"), "watch: nothing before start");
+        watch.track({"volume", "user-data/glasir/audio-boost", "user-data/glasir/audio-delay"});
+        watch.on_line(R"({"event":"property-change","id":1,"name":"volume","data":100.000000})");
+        watch.on_line(R"({"event":"property-change","id":2,"name":"user-data/glasir/audio-boost"})");
+        watch.on_line(R"({"event":"property-change","id":2,"name":"user-data/glasir/audio-boost","data":"100"})");
+        watch.on_line(R"({"event":"property-change","id":3,"name":"user-data/glasir/audio-delay","data":"0"})");
+        expect(!watch.changed("volume") && !watch.changed("user-data/glasir/audio-boost"),
+               "watch: the first values are not changes");
+        watch.on_line(R"({"event":"property-change","id":1,"name":"volume","data":85.000000})");
+        watch.on_line(R"({"event":"property-change","id":2,"name":"user-data/glasir/audio-boost","data":"150"})");
+        watch.on_line(R"({"event":"property-change","id":3,"name":"user-data/glasir/audio-delay","data":"30"})");
+        watch.on_line(R"({"event":"property-change","id":3,"name":"user-data/glasir/audio-delay","data":"0"})");
+        watch.on_line(R"({"request_id":0,"error":"success"})");
+        expect(watch.changed("volume") == "85" && watch.changed("user-data/glasir/audio-boost") == "150",
+               "watch: changed values");
+        expect(!watch.changed("user-data/glasir/audio-delay"), "watch: changed and back is no change");
     }
     std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
     return g_failures ? 1 : 0;

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <format>
 
+#include "json.h"
 #include "log.h"
 
 namespace glasir {
@@ -350,6 +351,79 @@ void MpvProcess::stop(const std::wstring &pipe, DWORD grace_ms) {
     if (send(pipe, ipc_command({L"quit"}), 500) && exited(grace_ms)) return;
     TerminateJobObject(job_, 1);
     exited(2000);
+}
+
+bool MpvWatch::start(const MpvProcess &mpv, const std::wstring &pipe, const std::vector<std::string> &properties) {
+    stop();
+    pipe_ = mpv.connect(pipe, 2000);
+    if (!pipe_) return false;
+    track(properties);
+    std::string commands;
+    for (size_t i = 0; i < properties.size(); ++i)
+        commands += std::format("{{\"command\":[\"observe_property\",{},\"{}\"]}}\n", i + 1, properties[i]);
+    DWORD written = 0;
+    if (!WriteFile(pipe_, commands.data(), DWORD(commands.size()), &written, nullptr)) {
+        log(L"IPC write failed (error {})", GetLastError());
+        CloseHandle(pipe_);
+        pipe_ = nullptr;
+        return false;
+    }
+    thread_ = std::thread([this] {
+        std::string pending;
+        char buffer[4096];
+        DWORD got = 0;
+        // Ends when mpv closes the pipe, or stop() cancels the read.
+        while (ReadFile(pipe_, buffer, sizeof(buffer), &got, nullptr) && got) {
+            pending.append(buffer, got);
+            for (size_t nl; (nl = pending.find('\n')) != std::string::npos;) {
+                on_line(pending.substr(0, nl));
+                pending.erase(0, nl + 1);
+            }
+        }
+    });
+    return true;
+}
+
+void MpvWatch::track(const std::vector<std::string> &properties) {
+    std::lock_guard lock(m_);
+    names_ = properties;
+    values_.assign(properties.size(), {});
+}
+
+void MpvWatch::stop() {
+    if (thread_.joinable()) {
+        while (WaitForSingleObject(thread_.native_handle(), 20) == WAIT_TIMEOUT)
+            CancelSynchronousIo(thread_.native_handle());
+        thread_.join();
+    }
+    if (pipe_) CloseHandle(pipe_);
+    pipe_ = nullptr;
+}
+
+void MpvWatch::on_line(const std::string &line) {
+    if (line.find("\"property-change\"") == std::string::npos) return;
+    const auto j = Json::parse(line);
+    if (!j || j->str("event") != "property-change") return;
+    const Json *data = j->get("data");
+    if (!data) return;  // not set (yet)
+    std::string value;
+    if (data->is(Json::Type::String)) value = data->string();
+    else if (data->is(Json::Type::Number)) value = std::format("{}", data->number());
+    else if (data->is(Json::Type::Bool)) value = data->boolean() ? "yes" : "no";
+    else return;
+    std::lock_guard lock(m_);
+    for (size_t i = 0; i < names_.size(); ++i)
+        if (names_[i] == j->str("name")) {
+            if (!values_[i].first) values_[i].first = value;
+            values_[i].last = value;
+        }
+}
+
+std::optional<std::string> MpvWatch::changed(const std::string &property) const {
+    std::lock_guard lock(m_);
+    for (size_t i = 0; i < names_.size(); ++i)
+        if (names_[i] == property && values_[i].last != values_[i].first) return values_[i].last;
+    return std::nullopt;
 }
 
 }  // namespace glasir

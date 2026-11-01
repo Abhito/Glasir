@@ -52,3 +52,12 @@ endif()
 # The portable app folder: `cmake --install` puts everything here.
 install(FILES LICENSE THIRD-PARTY-NOTICES.md DESTINATION .)
 install(DIRECTORY LICENSES DESTINATION .)
+install(FILES docs/README-release.txt DESTINATION . RENAME README.txt)
+
+# The release zip (`build.cmd package`): the same folder, our files only;
+# Glasir downloads mpv, ReShade and DLSS 5 on the user's PC.
+set(CPACK_GENERATOR ZIP)
+set(CPACK_PACKAGE_FILE_NAME "Glasir-${PROJECT_VERSION}")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+set(CPACK_PACKAGE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/out")
+include(CPack)
