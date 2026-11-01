@@ -5,22 +5,45 @@ Switch 2, Xbox Series, ...) through a capture card on your Windows PC, with low
 latency and modern enhancements applied live:
 
 - **Frame generation** (30 → 60, 60 → 120 fps), motion-compensated, any GPU
-- **VRR / G-SYNC / FreeSync** pacing
+- **VRR / G-SYNC / FreeSync** pacing, with repeated frames from the card
+  dropped (dedup), so a 30 fps game is shown at an even 30 fps
 - **DLSS 5 neural rendering** (NVIDIA RTX 50 series)
 - **Upscaling**: AMD FSR 1 on any GPU, NVIDIA RTX Video Super Resolution on
   RTX GPUs, or mpv's own
-- **HDR and SDR**, low-latency WASAPI audio with boost and delay
+- **HDR and SDR** from the same app, switched in the menu
+- **Low-latency WASAPI audio** from the card, with boost and a delay for lip
+  sync
+- A window to pick the card, mode and features before playing, and an
+  in-game menu (`Tab`) drawn after DLSS 5 and frame generation, so it stays
+  sharp and quick
+- One-click updates, and bug reports with one key (`F9`)
 
-> **Status: early development.** Glasir is being ported piece by piece from
-> a working prototype. The plan for v1 is in [docs/PLAN.md](docs/PLAN.md).
+> **Status: v1 is complete; no release has been published yet.** Everything
+> in [docs/PLAN.md](docs/PLAN.md) for v1 is built. It has been tested on one
+> PC so far (see [Tested with](#tested-with)); until the first release,
+> build it yourself ([Building](#building)).
 
-## Requirements (planned for v1)
+## Requirements
 
 - Windows 11, 64-bit
-- A capture card (any card that works with MPV-SW-Capture should work;
-  no guarantees)
-- Any DirectX 11 GPU for frame generation and upscaling; NVIDIA RTX 50
-  series for DLSS 5
+- A capture card. Cards Windows' Media Foundation can open get everything;
+  other cards are opened through DirectShow, without dedup and frame
+  generation (Glasir says so). No guarantees for any card.
+- Any DirectX 11 GPU for frame generation and upscaling; an NVIDIA RTX GPU
+  for RTX Video Super Resolution; an NVIDIA RTX 50 series GPU for DLSS 5
+- A VRR screen (G-SYNC or FreeSync) is best for frame pacing, but not
+  needed
+
+### Tested with
+
+- Consoles: PS5 and Switch 2, in SDR and HDR
+- Capture card: AVerMedia Live Gamer Ultra 2.1
+- GPU: NVIDIA GeForce RTX 5070 Ti
+- Screen: 3440x1440 at 165 Hz, G-SYNC, HDR
+
+Not yet tested: AMD and Intel GPUs, other capture cards, other screens.
+Reports from other setups are welcome (see
+[Something wrong?](#something-wrong)).
 
 ## Installing
 
@@ -94,7 +117,7 @@ DLSS 5 and frame generation, so it is sharp and does not lag.
 
 | Key | |
 |---|---|
-| `Tab` | the menu: DLSS 5, frame generation, sound, full screen, SDR/HDR (`Esc` or `Tab` closes it) |
+| `Tab` | the menu: DLSS 5, frame generation, scaling, sound, full screen, SDR/HDR (`Esc` or `Tab` closes it) |
 | double-click, `f` | full screen |
 | `Up` / `Down`, mouse wheel | volume |
 | `m` | mute |

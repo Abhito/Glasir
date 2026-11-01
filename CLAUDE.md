@@ -2,7 +2,7 @@
 
 - What and why: see `docs/PLAN.md` (v1 scope, components, licences, porting
   order). Read it before adding features.
-- Being ported piece by piece from the owner's working prototype in
+- Ported (v1 complete, not yet released) from the owner's working prototype in
   `C:\Users\Abhinav\Documents\dlss5\mpv_video\MPV-SW-Capture` (MSC +
   frame gen + capture + DLSS 5). That folder is the owner's daily app: read
   from it, never modify it.

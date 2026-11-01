@@ -3,6 +3,9 @@
 Name: Glasir.
 Decisions made 2026-10-31. This file is the reference for what v1 is and is not.
 
+Status (2026-11-01): all eight porting steps below are done; v1 is complete
+and not yet released.
+
 ## Goal
 
 Let people play modern consoles (PS5, Switch 2, Xbox Series, ...) through a

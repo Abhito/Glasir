@@ -21,7 +21,7 @@ there, and so is what you change in the menu (Tab).
 KEYS
 
   Tab                      the menu (Esc or Tab closes it): DLSS 5, frame
-                           generation, sound, full screen, SDR/HDR
+                           generation, scaling, sound, full screen, SDR/HDR
   double-click, f          full screen
   Up / Down, mouse wheel   volume
   m                        mute
