@@ -40,7 +40,9 @@ Keep / build:
   switch (frame gen off).
 - DLSS 5 with neural rendering on/off.
 - Upscaling: mpv's built-in scaling + FSR1 (any GPU); RTX VSR on NVIDIA.
-  DLSS / FSR upscaling later, enabled by compatibility.
+  DLSS / FSR upscaling later, enabled by compatibility. *(done: [video]
+  scaling = mpv | fsr | vsr, glasir_scaling.lua + Glasir's own FSR 1 port;
+  launcher and menu)*
 - Screenshots; window / full-screen controls. Full screen on another
   screen shape boxes the picture (black bars not processed).
 - Our own update check with one-click self-update (GitHub releases).
@@ -124,9 +126,10 @@ Each step tested against the real capture card before the next:
    presented frame, after DLSS 5 and frame generation, and built again for each;
    it saves to glasir.ini, switches SDR/HDR by restarting the picture (mpv exit
    code 42). The launcher is Glasir.exe's own window (Dear ImGui on D3D11),
-   [launcher] show / Shift / --play. Still to do: the key-press OSD texts (volume,
+   [launcher] show / Shift / --play. The key-press OSD texts (volume,
    boost, F8...) go through mpv's OSD, so through DLSS 5 and frame generation;
-   they could move into the overlay)*
+   they could move into the overlay)* *(done: toasts drawn by the overlay;
+   input.conf uses no-osd, everything else sends script-message glasir-toast)*
 8. Update check / self-update, bug-report capture, docs. *(done: update
    check in the launcher + `--update`, self-update from the release zip with
    SHA-256 and rollback; F9 / launcher / `--bug-report` save a zip with logs,

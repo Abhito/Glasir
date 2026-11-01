@@ -7,8 +7,8 @@ latency and modern enhancements applied live:
 - **Frame generation** (30 → 60, 60 → 120 fps), motion-compensated, any GPU
 - **VRR / G-SYNC / FreeSync** pacing
 - **DLSS 5 neural rendering** (NVIDIA RTX 50 series)
-- **Scaling** to your screen (mpv's own; FSR1 and RTX Video Super Resolution
-  are planned)
+- **Upscaling**: AMD FSR 1 on any GPU, NVIDIA RTX Video Super Resolution on
+  RTX GPUs, or mpv's own
 - **HDR and SDR**, low-latency WASAPI audio with boost and delay
 
 > **Status: early development.** Glasir is being ported piece by piece from
@@ -81,9 +81,16 @@ leaves the GPU more room (on 3440x1440, DLSS 5 takes about 40 % less time).
 The menu's "Full screen" and `f` switch to mpv's own full screen, over the
 whole screen.
 
-The picture is scaled to its place on the screen by mpv, before DLSS 5. A
-capture mode of the screen's height (2560x1440 on a 1440p screen) needs no
-scaling at all.
+A capture smaller than its place on the screen (1080p on a 1440p screen) is
+scaled up before DLSS 5, as "Scaling" in Glasir's window or the menu says:
+mpv's own (Lanczos), **AMD FSR 1** (sharper edges, any GPU) or **NVIDIA RTX
+Video Super Resolution** (the GPU's video engine, RTX GPUs; FSR 1 where it
+cannot run). The menu switches it at once. A capture mode of the screen's
+height (2560x1440 on a 1440p screen) needs no scaling at all.
+
+What the keys change (volume, mute, boost, delay, frame generation,
+screenshots) is shown at the top of the picture, drawn like the menu: after
+DLSS 5 and frame generation, so it is sharp and does not lag.
 
 | Key | |
 |---|---|

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "mpv_client.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -12,6 +13,7 @@ namespace {
 // What the menu follows; the ids are the indexes.
 const char *const kProperties[] = {
     "volume", "mute", "fullscreen", "user-data/glasir/audio-boost", "user-data/glasir/audio-delay", "width", "height",
+    "user-data/glasir/scaling",
 };
 
 int to_int(const Json &v, int fallback) {
@@ -82,7 +84,24 @@ void MpvClient::command(const std::vector<std::string> &words) {
     if (wake_) SetEvent(wake_);
 }
 
+Toast MpvClient::toast() const {
+    std::lock_guard lock(m_);
+    return toast_;
+}
+
 void MpvClient::on_line(const std::string &line) {
+    if (line.find("\"client-message\"") != std::string::npos) {
+        const auto j = Json::parse(line);
+        const Json *args = j ? j->get("args") : nullptr;
+        if (!args || args->items().size() < 2 || args->items()[0].string() != "glasir-toast") return;
+        std::lock_guard lock(m_);
+        toast_.text = args->items()[1].string();
+        toast_.seconds = args->items().size() > 2 ? std::atoi(args->items()[2].string().c_str()) / 1000.0 : 0;
+        if (toast_.seconds <= 0) toast_.seconds = 1.5;
+        toast_.from_property = false;
+        ++toast_.serial;
+        return;
+    }
     if (line.find("\"property-change\"") == std::string::npos) return;
     const auto j = Json::parse(line);
     if (!j) return;
@@ -91,14 +110,34 @@ void MpvClient::on_line(const std::string &line) {
     if (!id) return;
     const int n = int(id->number()) - 1;
     std::lock_guard lock(m_);
+    auto say = [&](std::string text) {
+        toast_.text = std::move(text);
+        toast_.seconds = 1.5;
+        toast_.from_property = true;
+        ++toast_.serial;
+    };
     switch (n) {
-    case 0: state_.volume = data ? data->number(-1) : -1; break;
-    case 1: state_.mute = data && data->boolean(); break;
+    case 0: {
+        const double before = state_.volume;
+        state_.volume = data ? data->number(-1) : -1;
+        if (seen_volume_ && state_.volume >= 0 && std::lround(state_.volume) != std::lround(before))
+            say("Volume: " + std::to_string(std::lround(state_.volume)) + "%");
+        seen_volume_ = seen_volume_ || state_.volume >= 0;
+        break;
+    }
+    case 1: {
+        const bool before = state_.mute;
+        state_.mute = data && data->boolean();
+        if (seen_mute_ && state_.mute != before) say(state_.mute ? "Muted" : "Sound on");
+        seen_mute_ = true;
+        break;
+    }
     case 2: state_.fullscreen = data && data->boolean(); break;
     case 3: state_.boost = data ? to_int(*data, -1) : -1; break;
     case 4: state_.delay = data ? to_int(*data, -1) : -1; break;
     case 5: state_.width = data ? to_int(*data, 0) : 0; break;
     case 6: state_.height = data ? to_int(*data, 0) : 0; break;
+    case 7: state_.scaling = data && data->is(Json::Type::String) ? data->string() : ""; break;
     default: break;
     }
 }
@@ -187,6 +226,7 @@ void MpvClient::run() {
         {
             std::lock_guard lock(m_);
             state_ = MpvState{};
+            seen_volume_ = seen_mute_ = false;
             if (stopping_) break;
         }
         WaitForSingleObject(wake_, 500);

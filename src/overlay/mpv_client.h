@@ -20,6 +20,17 @@ struct MpvState {
     int boost = -1;   // the audio plugin's (user-data/glasir/audio-boost), -1: no plugin
     int delay = -1;   // ms, likewise
     int width = 0, height = 0;  // the video's size
+    std::string scaling;        // glasir_scaling.lua's mode (user-data/glasir/scaling): mpv, fsr, vsr
+};
+
+// A short message to show over the picture (a toast): from a key mpv
+// handled (volume, mute) or one sent with "script-message glasir-toast
+// <text> [ms]". serial grows with each; 0: none yet.
+struct Toast {
+    std::string text;
+    double seconds = 1.5;
+    bool from_property = false;  // a value changed (also by the menu itself)
+    unsigned serial = 0;
 };
 
 class MpvClient {
@@ -34,6 +45,7 @@ public:
     MpvState state() const;
     // Queues {"command":[words...]}; sent in order.
     void command(const std::vector<std::string> &words);
+    Toast toast() const;
 
 private:
     void run();
@@ -45,6 +57,8 @@ private:
     bool stopping_ = false;  // under m_
     mutable std::mutex m_;
     MpvState state_;
+    Toast toast_;
+    bool seen_volume_ = false, seen_mute_ = false;  // since connecting: the first values are no change
     std::vector<std::string> queue_;  // JSON lines
 };
 

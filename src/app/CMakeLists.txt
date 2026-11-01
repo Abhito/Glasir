@@ -24,3 +24,5 @@ target_link_libraries(glasir PRIVATE glasir_app_core glasir_imgui shell32 user32
 
 install(TARGETS glasir RUNTIME DESTINATION .)
 install(FILES mpv_config/mpv.conf mpv_config/input.conf DESTINATION engine/portable_config)
+install(FILES mpv_config/scripts/glasir_scaling.lua DESTINATION engine/portable_config/scripts)
+install(FILES mpv_config/shaders/glasir_fsr1.glsl DESTINATION engine/portable_config/shaders)

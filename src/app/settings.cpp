@@ -90,6 +90,12 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         if (l == L"limited") s.sdr_full_range = false;
         else if (l == L"full") s.sdr_full_range = true;
         else return bad(L"limited or full");
+    } else if (name == L"video.scaling") {
+        const std::wstring l = lower(value);
+        if (l == L"mpv") s.scaling = Settings::Scaling::Mpv;
+        else if (l == L"fsr") s.scaling = Settings::Scaling::Fsr;
+        else if (l == L"vsr") s.scaling = Settings::Scaling::Vsr;
+        else return bad(L"mpv, fsr or vsr");
     } else if (name == L"video.hdr_peak_nits") {
         if (!parse_int(value, 80, 10000, n)) return bad(L"80 to 10000");
         s.hdr_peak_nits = int(n);
@@ -160,6 +166,14 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
 
 }  // namespace
 
+const wchar_t *scaling_name(Settings::Scaling scaling) {
+    switch (scaling) {
+    case Settings::Scaling::Fsr: return L"fsr";
+    case Settings::Scaling::Vsr: return L"vsr";
+    default: return L"mpv";
+    }
+}
+
 const char *default_settings_text() {
     return R"(; Glasir settings. Lines starting with ; are comments.
 ; A missing file is recreated with these defaults.
@@ -183,6 +197,10 @@ mode = sdr
 sdr_range = limited
 ; Peak brightness written into the HDR10 metadata.
 hdr_peak_nits = 1000
+; How a capture smaller than the window is scaled up (before DLSS 5):
+; mpv (its own Lanczos), fsr (AMD FSR 1: sharper, any GPU) or vsr (NVIDIA
+; RTX Video Super Resolution, RTX GPUs; FSR 1 where it cannot run).
+scaling = mpv
 
 [frames]
 ; 1: send mpv only new frames (a 30 fps game captured at 60 arrives at 30).

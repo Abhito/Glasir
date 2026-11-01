@@ -52,9 +52,15 @@ also work on the bars.
 
 ## The picture is soft or scaled
 
-Glasir scales the card's picture to its place on the screen (mpv's own
-scaling), before DLSS 5. A capture mode of your screen's height (2560x1440
-on a 1440p screen) needs no scaling; a 4K capture is scaled down anyway.
+Glasir scales the card's picture to its place on the screen before DLSS 5.
+A capture mode of your screen's height (2560x1440 on a 1440p screen) needs no
+scaling; a 4K capture is scaled down anyway.
+
+For a smaller capture, try "Scaling" in the menu: **FSR 1** gives sharper
+edges on any GPU; **RTX VSR** (NVIDIA RTX) uses the GPU's video engine and
+cleans up compression too. RTX VSR costs some GPU time, which DLSS 5 and
+frame generation also need; if frame generation starts pausing, go back to
+FSR 1. If RTX VSR cannot run, Glasir says so and uses FSR 1.
 
 ## The capture card does not open
 

@@ -113,7 +113,7 @@ std::string status_line(const MenuFrame &f, const MpvState &mpv) {
     return out;
 }
 
-void picture(const MenuFrame &f) {
+void picture(const MenuFrame &f, const MpvState &mpv) {
     section("PICTURE");
     reshade::api::effect_runtime *rt = f.runtime;
     const reshade::api::effect_technique feed = rt->find_technique("DLSS5_Feed.fx", "DLSS5_Feed");
@@ -178,6 +178,23 @@ void picture(const MenuFrame &f) {
         ImGui::EndDisabled();
         note("Frame generation needs Glasir's own capture with dedup (not the DirectShow fallback).");
     }
+
+    // Scaling up (glasir_scaling.lua in mpv): switched at once.
+    if (!mpv.scaling.empty()) {
+        static const struct {
+            const char *mode, *label;
+        } kModes[] = {{"mpv", "mpv"}, {"fsr", "FSR 1"}, {"vsr", "RTX VSR"}};
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Scaling");
+        for (const auto &m : kModes) {
+            ImGui::SameLine();
+            if (ImGui::RadioButton(m.label, mpv.scaling == m.mode) && mpv.scaling != m.mode) {
+                f.mpv->command({"script-message", "glasir-scaling", m.mode});
+                save(f, "video", "scaling", m.mode);
+            }
+        }
+        note("For a capture smaller than the screen. RTX VSR needs an NVIDIA RTX GPU.");
+    }
 }
 
 void sound(const MenuFrame &f, const MpvState &mpv, double now) {
@@ -230,6 +247,27 @@ void display(const MenuFrame &f, const MpvState &mpv) {
 
 void apply_style(float scale) { ui::apply_style(scale, 0.90f); }
 
+void draw_toast(const std::string &text, float alpha, float scale) {
+    const ImGuiIO &io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.05f), ImGuiCond_Always,
+                            ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.88f);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f * scale, 10.0f * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::Begin("##toast", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::PushFont(bold_font(), ImGui::GetStyle().FontSizeBase * 1.25f);
+    ImGui::PushTextWrapPos(io.DisplaySize.x * 0.5f);
+    ImGui::TextUnformatted(text.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::PopFont();
+    ImGui::End();
+    ImGui::PopStyleVar(4);
+}
+
 bool draw_menu(const MenuFrame &f) {
     ImGuiIO &io = ImGui::GetIO();
     const double now = ImGui::GetTime();
@@ -254,7 +292,7 @@ bool draw_menu(const MenuFrame &f) {
     ImGui::PopFont();
     note(status_line(f, mpv).c_str());
 
-    picture(f);
+    picture(f, mpv);
     if (mpv.connected) {
         sound(f, mpv, now);
         display(f, mpv);

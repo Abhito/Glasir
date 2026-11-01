@@ -5,9 +5,11 @@
 #include <dxgi.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <mutex>
 #include <string>
 
 #include <imgui.h>
@@ -24,6 +26,7 @@ namespace {
 
 constexpr UINT kOpenKey = VK_TAB;
 constexpr float kPaperNits = 203.0f;  // BT.2408's reference white, for the menu in HDR
+constexpr double kToastFade = 0.25;    // seconds a toast takes to fade out
 
 struct Overlay {
     Host host;
@@ -47,9 +50,26 @@ struct Overlay {
     // Frames the menu was drawn on since it opened: mpv's presents, and the
     // real frames frame generation presents itself.
     unsigned on_mpv = 0, on_real = 0;
+    bool mpv_started = false;
+    double closed_at = -100;  // when the menu last closed (its own changes still arrive then)
+    // The toast showing (render thread), and toasts from this add-on.
+    std::string toast_text;
+    double toast_start = 0, toast_until = 0;
+    unsigned mpv_toast_seen = 0;
+    std::mutex local_m;
+    std::string local_text;
+    double local_seconds = 1.5;
+    unsigned local_serial = 0, local_seen = 0;
 };
 
 Overlay g;
+
+double now_seconds() {
+    LARGE_INTEGER now, freq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    return double(now.QuadPart) / double(freq.QuadPart);
+}
 
 double seconds_since(LARGE_INTEGER &last) {
     LARGE_INTEGER now, freq;
@@ -93,8 +113,6 @@ bool init(ID3D11Device *device) {
     if (GetEnvironmentVariableW(L"GLASIR_SETTINGS", path, MAX_PATH) > 0) g.settings_path = path;
     wchar_t mode[8] = {};
     g.source_hdr = GetEnvironmentVariableW(L"GLASIR_VIDEO_MODE", mode, 8) > 0 && _wcsicmp(mode, L"hdr") == 0;
-    const std::string &p = g.host.mpv_pipe;
-    g.mpv.start(L"\\\\.\\pipe\\" + std::wstring(p.begin(), p.end()));
     reshade::log::message(reshade::log::level::info, "Glasir menu: ready");
     return true;
 }
@@ -145,6 +163,7 @@ void set_open(bool open) {
         reshade::log::message(reshade::log::level::info, text);
     }
     g.on_mpv = g.on_real = 0;
+    if (!open) g.closed_at = now_seconds();
     // mpv hides the cursor when the mouse rests; the menu needs it.
     g.mpv.command({"set", "cursor-autohide", open ? "no" : "100"});  // Glasir starts mpv with 100
     if (open) g.last.QuadPart = 0;
@@ -167,19 +186,27 @@ void build_and_draw(ID3D11DeviceContext *context, ID3D11Texture2D *back_buffer, 
         apply_style(scale);
         g.style_height = bb.Height;
     }
-    feed_input(runtime, bb.Width, bb.Height, wheel);
+    if (g.open) feed_input(runtime, bb.Width, bb.Height, wheel);  // a toast alone takes no input
 
     ImGui_ImplDX11_NewFrame();
     ImGui::NewFrame();
-    MenuFrame frame;
-    frame.runtime = runtime;
-    frame.host = &g.host;
-    frame.mpv = &g.mpv;
-    frame.encoding = g.encoding;
-    frame.settings_path = g.settings_path;
-    frame.source_hdr = g.source_hdr;
-    frame.scale = scale;
-    const bool keep = draw_menu(frame);
+    bool keep = true;
+    if (g.open) {
+        MenuFrame frame;
+        frame.runtime = runtime;
+        frame.host = &g.host;
+        frame.mpv = &g.mpv;
+        frame.encoding = g.encoding;
+        frame.settings_path = g.settings_path;
+        frame.source_hdr = g.source_hdr;
+        frame.scale = scale;
+        keep = draw_menu(frame);
+    }
+    const double now = now_seconds();
+    if (now < g.toast_until) {
+        const float alpha = float(std::clamp((g.toast_until - now) / kToastFade, 0.0, 1.0));
+        draw_toast(g.toast_text, alpha, scale);
+    }
     ImGui::Render();
 
     StateBackup backup(context);
@@ -199,9 +226,39 @@ void build_and_draw(ID3D11DeviceContext *context, ID3D11Texture2D *back_buffer, 
     if (!keep) set_open(false);
 }
 
+void show_toast(const std::string &text, double seconds, double now) {
+    g.toast_text = text;
+    g.toast_start = now;
+    g.toast_until = now + seconds + kToastFade;
+}
+
+// New toasts from mpv and from this add-on. Changes of volume or mute while
+// the menu is open (or just closed) are the menu's own: it shows them.
+void poll_toasts(double now) {
+    const Toast t = g.mpv.toast();
+    if (t.serial != g.mpv_toast_seen) {
+        g.mpv_toast_seen = t.serial;
+        if (!(t.from_property && (g.open || now - g.closed_at < 0.6))) show_toast(t.text, t.seconds, now);
+    }
+    std::lock_guard lock(g.local_m);
+    if (g.local_serial != g.local_seen) {
+        g.local_seen = g.local_serial;
+        show_toast(g.local_text, g.local_seconds, now);
+    }
+}
+
+bool toast_showing() { return now_seconds() < g.toast_until; }
+
 }  // namespace
 
 void set_host(const Host &host) { g.host = host; }
+
+void toast(const std::string &text, double seconds) {
+    std::lock_guard lock(g.local_m);
+    g.local_text = text;
+    g.local_seconds = seconds;
+    ++g.local_serial;
+}
 
 void note_color_space(reshade::api::color_space color_space) { g.color_space = color_space; }
 
@@ -221,32 +278,42 @@ void on_reshade_present(reshade::api::effect_runtime *runtime) {
         reshade::log::message(reshade::log::level::info, "Glasir menu: Tab opens it");
     }
 
-    if (runtime->is_key_pressed(kOpenKey) || (g.open && runtime->is_key_pressed(VK_ESCAPE))) set_open(!g.open);
-    if (!g.open) return;
+    // mpv's line (for the toasts) and the drawing are set up at once, not on
+    // the first key: building the font then would be a hitch in the game.
+    if (!g.mpv_started) {
+        g.mpv_started = true;
+        const std::string &p = g.host.mpv_pipe;
+        g.mpv.start(L"\\\\.\\pipe\\" + std::wstring(p.begin(), p.end()));
+    }
     if (!g.device && !init(device)) {
         g.failed = true;
         reshade::log::message(reshade::log::level::error, "Glasir menu: could not start; it stays off");
-        set_open(false);
         return;
     }
-    runtime->block_input_next_frame();
+
+    if (runtime->is_key_pressed(kOpenKey) || (g.open && runtime->is_key_pressed(VK_ESCAPE))) set_open(!g.open);
+    poll_toasts(now_seconds());
+    if (!g.open && !toast_showing()) return;
+    if (g.open) runtime->block_input_next_frame();
     ComPtr<ID3D11Texture2D> back_buffer;
     if (FAILED(swapchain->GetBuffer(0, IID_PPV_ARGS(&back_buffer)))) return;
     g.runtime = runtime;
     build_and_draw(g.context.Get(), back_buffer.Get(), true);
-    ++g.on_mpv;
+    if (g.open) ++g.on_mpv;
 }
 
 void draw_again(ID3D11DeviceContext *context, ID3D11Texture2D *back_buffer) {
     // Built again rather than drawn again: the menu then answers at the rate
     // frames reach the screen, not at mpv's.
-    if (!g.open || !g.runtime || !g.imgui) return;
+    if ((!g.open && !toast_showing()) || !g.runtime || !g.imgui) return;
     build_and_draw(context, back_buffer, false);
-    ++g.on_real;
+    if (g.open) ++g.on_real;
 }
 
 void release() {
     g.mpv.stop();
+    g.mpv_started = false;
+    g.toast_until = 0;
     if (g.backend) {
         ImGui::SetCurrentContext(g.imgui);
         ImGui_ImplDX11_Shutdown();

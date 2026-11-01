@@ -421,9 +421,11 @@ int adjust(int value, const char *arg) {
     return (arg[0] == '+' || arg[0] == '-') ? value + n : n;
 }
 
+// A message over the picture: Glasir's overlay shows it (after DLSS 5 and
+// frame generation), not mpv's OSD.
 void show(mpv_handle *mpv, const std::string &text, int ms = 1500) {
     const std::string duration = std::to_string(ms);
-    const char *cmd[] = {"show-text", text.c_str(), duration.c_str(), nullptr};
+    const char *cmd[] = {"script-message", "glasir-toast", text.c_str(), duration.c_str(), nullptr};
     mpv_command_async(mpv, 0, cmd);
 }
 
@@ -448,14 +450,15 @@ extern "C" MPV_EXPORT int mpv_open_cplugin(mpv_handle *mpv) {
     auto update_gain = [&] { engine.gain = output_gain(volume, boost, muted); };
     engine.delay_ms = delay;
     update_gain();
+    ULONGLONG missing_notice = 0;  // when to say the card's audio input was not found
     publish(mpv, "user-data/glasir/audio-delay", std::to_string(delay));
     publish(mpv, "user-data/glasir/audio-boost", std::to_string(boost));
     if (device.empty()) {
         log("audio off (no device)");
         publish(mpv, "user-data/glasir/audio-status", "off");
-        if (script_opt(mpv, "glasir_audio-missing") == "1")
-            show(mpv, "No sound: the capture card's audio input was not found.\nSet [audio] device in glasir.ini.",
-                 8000);
+        // Said a moment later: the overlay that shows it connects once
+        // the picture is up.
+        if (script_opt(mpv, "glasir_audio-missing") == "1") missing_notice = GetTickCount64() + 4000;
     } else {
         engine.start(device, minimum_period);
     }
@@ -467,6 +470,11 @@ extern "C" MPV_EXPORT int mpv_open_cplugin(mpv_handle *mpv) {
     for (;;) {
         mpv_event *event = mpv_wait_event(mpv, 0.25);
         if (event->event_id == MPV_EVENT_SHUTDOWN) break;
+        if (missing_notice && GetTickCount64() >= missing_notice) {
+            missing_notice = 0;
+            show(mpv, "No sound: the capture card's audio input was not found. Set [audio] device in glasir.ini.",
+                 8000);
+        }
         if (event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
             auto *property = static_cast<mpv_event_property *>(event->data);
             if (property->data) {

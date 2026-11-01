@@ -21,6 +21,9 @@ struct Settings {
     bool hdr = false;
     bool sdr_full_range = false;
     int hdr_peak_nits = 1000;
+    // How the capture is scaled up to the window (glasir_scaling.lua).
+    enum class Scaling { Mpv, Fsr, Vsr };
+    Scaling scaling = Scaling::Mpv;
     // [frames]
     bool dedup = true;
     int dedup_threshold = 3;
@@ -52,6 +55,9 @@ struct Settings {
 // Reads the file; a missing file is created with the defaults. Unknown keys
 // are logged and skipped. False with a message for a value that makes no sense.
 bool load_settings(const std::wstring &path, Settings &s, std::wstring &error);
+
+// "mpv", "fsr", "vsr": glasir.ini's and glasir_scaling.lua's names.
+const wchar_t *scaling_name(Settings::Scaling scaling);
 
 // One setting, as "section.key=value" (the command line's --set).
 bool apply_override(Settings &s, const std::wstring &assignment, std::wstring &error);

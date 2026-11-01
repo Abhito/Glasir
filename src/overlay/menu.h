@@ -22,6 +22,9 @@ struct MenuFrame {
     float scale = 1;             // 1 at 1080 lines
 };
 
+// A toast at the top of the picture; alpha fades it out.
+void draw_toast(const std::string &text, float alpha, float scale);
+
 // The theme, at this scale.
 void apply_style(float scale);
 

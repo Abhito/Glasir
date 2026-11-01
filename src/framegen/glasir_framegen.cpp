@@ -332,7 +332,7 @@ private:
 
 Link g_link;
 
-// ---- mpv OSD ------------------------------------------------------------------
+// ---- mpv IPC ------------------------------------------------------------------
 
 // Sends one IPC line to mpv, on a thread of its own so the render thread never
 // waits on the pipe. The thread holds a reference to this module and drops it
@@ -376,12 +376,6 @@ void mpv_send(const std::string &line) {
         delete job;
         FreeLibrary(self);
     }
-}
-
-// A line in mpv's OSD. The texts are fixed strings here, so they need no JSON
-// escaping.
-void mpv_show_text(const char *text) {
-    mpv_send(std::string("{\"command\":[\"show-text\",\"") + text + "\",1500]}\n");
 }
 
 // Asks Glasir.exe (an IPC client of mpv) to save a bug report, with the
@@ -562,10 +556,10 @@ private:
             const bool report = job->report;
             delete job;
             if (report) {
-                if (folder.empty()) mpv_show_text("Frame generation: could not save the frames, see ReShade.log");
+                if (folder.empty()) glasir::overlay::toast("Frame generation: could not save the frames, see ReShade.log");
                 mpv_bug_report(folder, folder.empty() ? "failed" : "");  // Glasir.exe says when it is saved
             } else {
-                mpv_show_text(folder.empty() ? "Frame generation: capture failed, see ReShade.log"
+                glasir::overlay::toast(folder.empty() ? "Frame generation: capture failed, see ReShade.log"
                                              : "Frame generation: frames saved to Captures");
             }
             HMODULE module = nullptr;
@@ -1491,16 +1485,16 @@ void FrameGen::toggle(reshade::api::effect_runtime *runtime) {
         (g_settings.toggle_key <= 0 || !runtime->is_key_pressed(static_cast<uint32_t>(g_settings.toggle_key))))
         return;
     if (broken_) {
-        mpv_show_text("Frame generation: failed, see ReShade.log");
+        glasir::overlay::toast("Frame generation: failed, see ReShade.log");
         return;
     }
     if (!source_ok()) {
         // Not saved: this launcher cannot run it either way.
-        mpv_show_text("Frame generation: needs a launcher with dedup=1");
+        glasir::overlay::toast("Frame generation: needs a launcher with dedup=1");
         return;
     }
     set_enabled(!g_settings.enabled);
-    mpv_show_text(g_settings.enabled ? "Frame generation: ON" : "Frame generation: OFF");
+    glasir::overlay::toast(g_settings.enabled ? "Frame generation: on" : "Frame generation: off");
 }
 
 void FrameGen::set_enabled(bool on) {
@@ -1740,7 +1734,7 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
     if (timed) capture_after_ = 0;
     if (!capture_.busy() && (timed || capture_key)) {
         if (!capture_.start(device_.Get(), bb, pq(), !timed)) {
-            mpv_show_text("Frame generation: cannot capture this picture format");
+            glasir::overlay::toast("Frame generation: cannot capture this picture format");
             if (!timed) mpv_bug_report(L"", "failed");
         }
     }

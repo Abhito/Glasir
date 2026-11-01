@@ -103,14 +103,45 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### AMD FidelityFX Super Resolution 1
+
+`engine\portable_config\shaders\glasir_fsr1.glsl` (the FSR 1 scaling) is
+Glasir's port of AMD's `ffx_fsr1.h`, from
+https://github.com/GPUOpen-Effects/FidelityFX-FSR (v1.0.2).
+
+```
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+RTX Video Super Resolution is NVIDIA's, in its driver; Glasir asks for it
+through mpv's d3d11vpp filter and includes none of it.
+
 The menu uses the Segoe UI font that comes with Windows; Glasir does not
 include it.
 
 <!--
 Added as each part is ported (docs/PLAN.md):
 - MPV-SW-Capture by TyRaS-SW (MIT) - scripts we keep, marked as modified.
-- AMD FSR1 (MIT), NVIDIA Image Scaling (MIT), Adaptive Sharpen (BSD-2-Clause),
-  KrigBilateral (LGPL-3.0, own file + LICENSES/LGPL-3.0.txt).
+- NVIDIA Image Scaling (MIT), Adaptive Sharpen (BSD-2-Clause),
+  KrigBilateral (LGPL-3.0, own file + LICENSES/LGPL-3.0.txt), if ever used.
 - DLSS5-Feeder (MIT, Jean-Laurent Rouzies; portions NIGos, MIT) if shipped.
 -->
 

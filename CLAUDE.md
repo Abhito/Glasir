@@ -49,6 +49,11 @@
   `Glasir.exe --update-from out\Glasir-x.y.z.zip` on a copy of the app folder
   (never on out\Glasir while the owner uses it). F9 can be posted to mpv's
   window (class `mpv`) without focus; reports go to `Bug reports\`.
+- Driving mpv in tests: mpv ignores key messages posted from another
+  process (ReShade's input does see them: F9, Tab); use IPC `keypress KEY` to
+  run mpv's own bindings. To see the picture with the overlay (toasts, menu),
+  capture mpv's window with `PrintWindow` flag 3 (it may be covered); never
+  copy the screen, which shows whatever the owner has open.
 - Git Bash heredocs collapse `\\` to `\` (e.g. `\\.\pipe\...`): write
   scripts with the Write tool, not `cat <<EOF`.
 - Licences: MIT everywhere except `src/framegen/` (MPL-2.0). Every source

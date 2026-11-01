@@ -96,6 +96,8 @@ struct Choice {
     std::wstring audio_device;
     bool borderless = true;
     bool show = true;
+    Settings::Scaling scaling = Settings::Scaling::Mpv;
+    UINT32 shown_height = 0;  // the mode the window shows (automatic resolved), for the scaling note
 };
 
 struct ModeItem {
@@ -319,6 +321,41 @@ struct BugReport {
     }
 };
 
+// How a capture smaller than the screen is scaled up.
+void scaling_row(Choice &c, const Found *f) {
+    const bool rtx = f && f->gpu.vendor == kVendorNvidia && f->gpu.name.find(L"RTX") != std::wstring::npos;
+    struct Option {
+        Settings::Scaling value;
+        const char *label;
+    };
+    static const Option options[] = {
+        {Settings::Scaling::Mpv, "mpv (Lanczos)"},
+        {Settings::Scaling::Fsr, "AMD FSR 1 (sharper)"},
+        {Settings::Scaling::Vsr, "NVIDIA RTX Video Super Resolution"},
+    };
+    row("Scaling");
+    const char *current = options[0].label;
+    for (const Option &o : options)
+        if (o.value == c.scaling) current = o.label;
+    if (ImGui::BeginCombo("##scaling", current)) {
+        for (const Option &o : options) {
+            const bool off = o.value == Settings::Scaling::Vsr && !rtx;
+            if (off) ImGui::BeginDisabled();
+            if (ImGui::Selectable(o.label, o.value == c.scaling)) c.scaling = o.value;
+            if (off) ImGui::EndDisabled();
+        }
+        ImGui::EndCombo();
+    }
+    if (c.scaling == Settings::Scaling::Vsr && !rtx) c.scaling = Settings::Scaling::Fsr;  // not this GPU
+    // A capture as tall as its place on the screen is not scaled at all.
+    const int screen_w = GetSystemMetrics(SM_CXSCREEN), screen_h = GetSystemMetrics(SM_CYSCREEN);
+    const UINT32 place_h = UINT32(std::min(screen_h, screen_w * 9 / 16));
+    if (c.shown_height && c.shown_height >= place_h)
+        dim("Not used: the capture is as large as its place on the screen.");
+    else if (c.scaling == Settings::Scaling::Vsr)
+        dim("Uses the GPU's video engine; FSR 1 if it cannot run.");
+}
+
 struct Screen {
     Choice c;
     const Choice original;
@@ -409,6 +446,7 @@ void draw(Screen &s) {
         const auto picked = device ? choose_mode(device->modes, request) : std::nullopt;
         const std::string auto_mode =
             picked ? "Automatic (" + mode_text(picked->width, picked->height, picked->fps) + ")" : std::string("Automatic");
+        c.shown_height = c.width ? c.height : (picked ? picked->height : 0);
         row("Mode");
         const std::string mode_label = c.width ? mode_text(c.width, c.height, c.fps) : auto_mode;
         if (ImGui::BeginCombo("##mode", mode_label.c_str())) {
@@ -457,6 +495,7 @@ void draw(Screen &s) {
         if (ImGui::RadioButton("Fast (less GPU)", c.fast)) c.fast = true;
         ImGui::Unindent();
     }
+    scaling_row(c, f);
 
     heading("SOUND");
     ImGui::Checkbox("Play the card's sound", &c.audio);
@@ -564,6 +603,7 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool rtx50
     if (c.audio_device != o.audio_device) v.push_back({L"audio", L"device", c.audio_device});
     if (c.borderless != o.borderless) v.push_back({L"window", L"mode", c.borderless ? L"borderless" : L"windowed"});
     if (c.show != o.show) v.push_back({L"launcher", L"show", c.show ? L"1" : L"0"});
+    if (c.scaling != o.scaling) v.push_back({L"video", L"scaling", scaling_name(c.scaling)});
     if (v.empty()) return;
     save_settings(path, v);
     log(L"launcher: {} setting(s) saved to {}", v.size(), path);
@@ -601,6 +641,7 @@ Choice from(const Settings &s) {
     c.audio_device = s.audio_device;
     c.borderless = s.borderless;
     c.show = s.show_launcher;
+    c.scaling = s.scaling;
     return c;
 }
 

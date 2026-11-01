@@ -8,6 +8,12 @@
 // Tab opens and closes it (Esc closes). While it is open, keys and the mouse
 // go to the menu, not to mpv; mpv gets every frame and frame generation
 // rests, so the menu redraws at the capture rate even on a still picture.
+//
+// It also shows toasts: short messages at the top of the picture for the
+// keys (volume, mute, boost, delay, frame generation, screenshots) instead of
+// mpv's OSD, which would go through DLSS 5 and frame generation. mpv's
+// volume and mute are followed; anything else sends "script-message
+// glasir-toast <text> [ms]" to mpv, or calls toast() in this add-on.
 #pragma once
 #include <d3d11.h>
 
@@ -55,6 +61,9 @@ void note_color_space(reshade::api::color_space color_space);
 
 // The menu is open (mpv should get every frame, frame generation rest).
 bool menu_open();
+
+// Shows a toast for seconds (any thread).
+void toast(const std::string &text, double seconds = 1.5);
 
 // mpv's device is going away: let go of everything made on it.
 void release();

@@ -425,6 +425,24 @@ int main() {
         std::wstring error;
         expect(s.update_check && apply_override(s, L"update.check=0", error) && !s.update_check,
                "update.check, on by default");
+        expect(s.scaling == Settings::Scaling::Mpv && apply_override(s, L"video.scaling=VSR", error) &&
+                   s.scaling == Settings::Scaling::Vsr && !apply_override(s, L"video.scaling=dlss", error),
+               "video.scaling: mpv by default, vsr, not anything else");
+        MpvPlan plan;
+        plan.layout.width = 1920;
+        plan.layout.height = 1080;
+        s.hdr = true;
+        s.hdr_peak_nits = 800;
+        const auto args = mpv_arguments(plan, s);
+        auto has = [&](const wchar_t *arg) {
+            for (const auto &a : args)
+                if (a == arg) return true;
+            return false;
+        };
+        expect(has(L"--script-opts-append=glasir_scaling-mode=vsr") &&
+                   has(L"--script-opts-append=glasir_scaling-hdr=yes") &&
+                   has(L"--script-opts-append=glasir_scaling-hdr_peak=800"),
+               "mpv gets the scaling mode and the HDR tags for VSR");
     }
     std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
     return g_failures ? 1 : 0;

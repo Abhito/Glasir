@@ -746,7 +746,8 @@ private:
                         : r.why == "unavailable" ? L" (no frames: frame generation is not running)"
                                                  : L" (the frames could not be saved)";
         }
-        mpv_.send(pipe_, ipc_command({L"show-text", text, L"4000"}), 2000);
+        // A toast from the overlay (after DLSS 5 and frame generation), not mpv's OSD.
+        mpv_.send(pipe_, ipc_command({L"script-message", L"glasir-toast", text, L"4000"}), 2000);
     }
 
     std::wstring dir_, settings_, pipe_;

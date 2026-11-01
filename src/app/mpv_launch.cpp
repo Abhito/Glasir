@@ -82,6 +82,14 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
     if (!plan.audio_log.empty()) opt(L"log", plan.audio_log);
     if (plan.audio_missing) opt(L"missing", L"1");
 
+    // Scaling up (portable_config\scripts\glasir_scaling.lua).
+    auto scaling = [&](const std::wstring &key, const std::wstring &value) {
+        a.push_back(L"--script-opts-append=glasir_scaling-" + key + L"=" + value);
+    };
+    scaling(L"mode", scaling_name(s.scaling));
+    scaling(L"hdr", s.hdr ? L"yes" : L"no");
+    scaling(L"hdr_peak", std::to_wstring(s.hdr_peak_nits));
+
     if (plan.raw) {
         a.push_back(L"--cache=no");
         a.push_back(L"--demuxer=rawvideo");
