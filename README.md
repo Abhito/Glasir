@@ -42,7 +42,12 @@ To remove Glasir, delete its folder.
 
 ## Using it
 
-`glasir.ini` picks the card, size, rate, SDR or HDR, dedup, frame
+`Glasir.exe` opens its window first: the capture card and its mode, SDR or
+HDR, DLSS 5, frame generation, the sound and the window mode. Press **Play**.
+(Untick "Show this window when Glasir starts" to play at once; hold Shift
+while starting Glasir to see the window again. `Glasir.exe --play` skips it.)
+
+Everything is kept in `glasir.ini`, which picks the card, size, rate, SDR or HDR, dedup, frame
 generation, DLSS 5, sound and the window mode; every key is explained in the
 file. The card's own audio input is found automatically. DLSS 5 turns itself
 on with an NVIDIA RTX 50 series GPU (`[dlss5] enabled = auto`). Volume, boost

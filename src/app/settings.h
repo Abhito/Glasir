@@ -41,6 +41,8 @@ struct Settings {
     bool audio_min_period = true;
     // [window]
     bool borderless = true;
+    // [launcher]
+    bool show_launcher = true;  // Glasir.exe opens its window first
     // [debug]
     bool mpv_log = false;
 };

@@ -21,4 +21,8 @@
 CMakeLists.txt text
 
 *.png binary
+
+# Vendored third-party files stay byte for byte as upstream ships them
+# (third_party/README.md lists their SHA-256).
+third_party/** -text
 *.ico binary

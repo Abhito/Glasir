@@ -118,5 +118,12 @@ Each step tested against the real capture card before the next:
    and input.conf are Glasir's own files. F6/F8 stay session toggles; DLSS 5
    tuning in the ReShade overlay stays in ReShade.ini, starting from its
    authors' defaults)*
-7. Launcher + in-game menu (after-effects overlay prototype first).
+7. Launcher + in-game menu (after-effects overlay prototype first). *(done: the menu
+   (src/overlay, Dear ImGui) is drawn by the frame generation add-on on every
+   presented frame, after DLSS 5 and frame generation, and built again for each;
+   it saves to glasir.ini, switches SDR/HDR by restarting the picture (mpv exit
+   code 42). The launcher is Glasir.exe's own window (Dear ImGui on D3D11),
+   [launcher] show / Shift / --play. Still to do: the key-press OSD texts (volume,
+   boost, F8...) go through mpv's OSD, so through DLSS 5 and frame generation;
+   they could move into the overlay)*
 8. Update check / self-update, bug-report capture, docs.

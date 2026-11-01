@@ -9,7 +9,7 @@
 // input: every frame, no dedup, no frame generation.
 //
 // Usage:
-//   Glasir.exe [--settings FILE] [--set section.key=value ...] [--no-dialogs]
+//   Glasir.exe [--play] [--settings FILE] [--set section.key=value ...] [--no-dialogs]
 //   Glasir.exe --input-raw FILE|- [--raw-format nv12|p010|yuy2|uyvy] --set capture.width=W ...
 //   Glasir.exe --list
 //   Glasir.exe --version
@@ -18,6 +18,10 @@
 // --input-raw reads tightly packed frames from a file or standard input
 // instead of the card (capture.width, capture.height and capture.fps must be
 // set), for testing the same path without one.
+//
+// Glasir.exe opens its window first (launcher.cpp) unless glasir.ini says
+// [launcher] show = 0 (Shift held at start shows it anyway), --play is given,
+// or nothing may be shown (--no-dialogs, --input-raw).
 //
 // --setup downloads (or updates) the programs Glasir runs on: it asks which,
 // or with --no-dialogs takes --components (default: mpv, ReShade, and DLSS 5
@@ -45,6 +49,7 @@
 #include "components.h"
 #include "devices.h"
 #include "glasir_version.h"
+#include "launcher.h"
 #include "log.h"
 #include "mpv_launch.h"
 #include "gpu.h"
@@ -71,6 +76,8 @@ struct Args {
     bool list = false;
     bool version = false;
     bool setup = false;
+    bool from_launcher = false;  // setup asked for in the launcher: it comes back after
+    bool play = false;           // no launcher
     bool dialogs = true;
 };
 
@@ -124,6 +131,8 @@ bool parse_args(Args &a, std::wstring &error) {
             a.list = true;
         } else if (arg == L"--version") {
             a.version = true;
+        } else if (arg == L"--play") {
+            a.play = true;
         } else if (arg == L"--setup") {
             a.setup = true;
         } else if (arg == L"--components") {
@@ -607,7 +616,7 @@ SetupResult setup(const Args &args, const std::wstring &dir, const std::wstring 
     }
     if (args.setup) {
         if (args.dialogs) {
-            show(L"Glasir is set up. Start it again to play.", MB_ICONINFORMATION);
+            if (!args.from_launcher) show(L"Glasir is set up. Start it again to play.", MB_ICONINFORMATION);
         } else {
             std::wstring text = L"Installed in " + engine + L":\n";
             for (const auto &line : installed_versions(engine)) text += L"  " + line + L"\n";
@@ -647,13 +656,7 @@ constexpr DWORD kRestartCode = 42;
 // the menu asked to start again (again: this is such a start).
 int run(const Args &args, bool again, bool &stuck, bool &restart) {
     const std::wstring dir = app_dir();
-    if (!again) {
-        CreateDirectoryW((dir + L"\\logs").c_str(), nullptr);
-        log_open(dir + L"\\logs\\glasir.log");
-        log(L"{} {} ({})", widen(GLASIR_NAME), widen(GLASIR_VERSION), widen(GLASIR_GIT_DESCRIBE));
-    } else {
-        log(L"starting again, as the menu asked");
-    }
+    if (again) log(L"starting again, as the menu asked");
 
     // One Glasir at a time, before anything is read or written: one still
     // closing writes glasir.ini and ReShade.ini as it goes, and setup may
@@ -906,6 +909,39 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     return rc;
 }
 
+std::wstring settings_file(const Args &args) {
+    return args.settings_path.empty() ? app_dir() + L"\\glasir.ini" : args.settings_path;
+}
+
+bool launcher_wanted(const Args &args) {
+    if (!args.dialogs || args.setup || args.play || !args.input_raw.empty()) return false;
+    Settings s;
+    std::wstring error;
+    load_settings(settings_file(args), s, error);  // an error is shown when playing
+    return s.show_launcher || (GetAsyncKeyState(VK_SHIFT) & 0x8000);
+}
+
+// The launcher until Play (true) or the window is closed (false). Its
+// Download/Update buttons run setup, as --setup does, and come back.
+bool launcher(const Args &args) {
+    const std::wstring dir = app_dir();
+    for (;;) {
+        const LauncherAction action = run_launcher(settings_file(args), dir + L"\\engine");
+        if (action != LauncherAction::Setup) {
+            log(L"launcher: {}", action == LauncherAction::Play ? L"play" : L"closed");
+            return action == LauncherAction::Play;
+        }
+        Args setup_args = args;
+        setup_args.setup = setup_args.from_launcher = true;
+        HANDLE quit_event = CreateEventW(nullptr, TRUE, FALSE, kQuitEvent);
+        {
+            Instance instance(quit_event);  // a Glasir playing closes first: setup replaces its files
+            if (instance.take()) setup(setup_args, dir, dir + L"\\engine");
+        }
+        CloseHandle(quit_event);
+    }
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
@@ -932,13 +968,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
     int rc = 0;
     bool stuck = false;
-    if (args.list)
+    if (args.list) {
         print(device_list_text(), args.dialogs);
-    else
-        for (bool again = false, restart = true; restart && !stuck; again = true) {
-            restart = false;
-            rc = run(args, again, stuck, restart);
-        }
+    } else {
+        const std::wstring dir = app_dir();
+        CreateDirectoryW((dir + L"\\logs").c_str(), nullptr);
+        log_open(dir + L"\\logs\\glasir.log");
+        log(L"{} {} ({})", widen(GLASIR_NAME), widen(GLASIR_VERSION), widen(GLASIR_GIT_DESCRIBE));
+        bool play = true;
+        if (launcher_wanted(args))
+            play = launcher(args);
+        if (play)
+            for (bool again = false, restart = true; restart && !stuck; again = true) {
+                restart = false;
+                rc = run(args, again, stuck, restart);
+            }
+    }
     if (!g_error.empty()) {
         if (args.dialogs) show(g_error, MB_ICONERROR);
         else print(L"Glasir: " + g_error + L"\n", false);  // to a console or pipe, if there is one

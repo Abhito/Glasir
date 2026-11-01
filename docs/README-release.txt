@@ -7,10 +7,12 @@ GETTING STARTED
    C:\Games\Glasir. Not "Program Files": Glasir keeps its settings, logs
    and screenshots in its own folder.
 2. Plug in your capture card and turn the console on.
-3. Start Glasir.exe. The first time, it asks to download the programs it
-   runs on (mpv and ReShade, plus DLSS 5 on an NVIDIA RTX 50 series GPU).
-   They come straight from their authors' sites; THIRD-PARTY-NOTICES.md
-   lists them and their licences.
+3. Start Glasir.exe, pick your card and what you want in its window, and
+   press Play. The first time, it asks to download the programs it runs on
+   (mpv and ReShade, plus DLSS 5 on an NVIDIA RTX 50 series GPU). They come
+   straight from their authors' sites; THIRD-PARTY-NOTICES.md lists them and
+   their licences.
+4. While playing, Tab opens the menu.
 
 Settings are in glasir.ini (written on the first start, every setting
 explained). Volume, boost and audio delay you change while playing are kept

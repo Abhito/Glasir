@@ -9,15 +9,13 @@
 #include <imgui.h>
 
 #include "ini_edit.h"
+#include "ui_style.h"
 
 namespace glasir::overlay {
 namespace {
 
-// Glasir's gold, on a dark panel.
-const ImVec4 kGold(0.88f, 0.69f, 0.25f, 1.0f);
-const ImVec4 kGoldDim(0.88f, 0.69f, 0.25f, 0.55f);
-const ImVec4 kText(0.93f, 0.93f, 0.93f, 1.0f);
-const ImVec4 kTextDim(0.62f, 0.62f, 0.62f, 1.0f);
+using ui::kGold;
+using ui::kTextDim;
 
 // A value the menu shows that mpv owns: mpv's value, except for a moment
 // after the menu changed it (until mpv's answer comes back) and while it is
@@ -209,40 +207,7 @@ void display(const MenuFrame &f, const MpvState &mpv) {
 
 }  // namespace
 
-void apply_style(float scale) {
-    ImGuiStyle s;
-    ImGui::StyleColorsDark(&s);
-    s.WindowPadding = ImVec2(22, 18);
-    s.FramePadding = ImVec2(10, 6);
-    s.ItemSpacing = ImVec2(10, 9);
-    s.ItemInnerSpacing = ImVec2(8, 6);
-    s.GrabMinSize = 14;
-    s.WindowBorderSize = 0;
-    s.FrameRounding = 6;
-    s.GrabRounding = 6;
-    s.WindowRounding = 0;
-    s.ScrollbarSize = 10;
-    ImVec4 *c = s.Colors;
-    c[ImGuiCol_WindowBg] = ImVec4(0.06f, 0.06f, 0.07f, 0.90f);
-    c[ImGuiCol_Text] = kText;
-    c[ImGuiCol_TextDisabled] = kTextDim;
-    c[ImGuiCol_FrameBg] = ImVec4(1, 1, 1, 0.08f);
-    c[ImGuiCol_FrameBgHovered] = ImVec4(1, 1, 1, 0.14f);
-    c[ImGuiCol_FrameBgActive] = ImVec4(1, 1, 1, 0.20f);
-    c[ImGuiCol_CheckMark] = kGold;
-    c[ImGuiCol_SliderGrab] = kGold;
-    c[ImGuiCol_SliderGrabActive] = ImVec4(1.0f, 0.82f, 0.40f, 1.0f);
-    c[ImGuiCol_Button] = ImVec4(1, 1, 1, 0.08f);
-    c[ImGuiCol_ButtonHovered] = kGoldDim;
-    c[ImGuiCol_ButtonActive] = kGold;
-    c[ImGuiCol_Separator] = ImVec4(1, 1, 1, 0.12f);
-    c[ImGuiCol_NavCursor] = kGold;
-    c[ImGuiCol_Header] = kGoldDim;
-    s.ScaleAllSizes(scale);
-    s.FontSizeBase = 20.0f;
-    s.FontScaleMain = scale;
-    ImGui::GetStyle() = s;
-}
+void apply_style(float scale) { ui::apply_style(scale, 0.90f); }
 
 bool draw_menu(const MenuFrame &f) {
     ImGuiIO &io = ImGui::GetIO();

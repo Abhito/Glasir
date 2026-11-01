@@ -25,6 +25,13 @@
   `mpv_video\MPV-SW-Capture\framegen-addon\eval\seq` and `framegen-captures`).
   `GLASIR_FRAMEGEN_CAPTURE_AFTER=<s>` makes the add-on save frames to
   `out\Glasir\Captures` (16-bit PQ for HDR: tone-map before viewing).
+- Glasir.exe opens its launcher window unless `--no-dialogs`, `--play` or
+  `--input-raw` is given; the tools pass `--no-dialogs`. The in-game menu
+  (Tab) logs "Glasir menu: ..." to `engine\ReShade.log`, with how many frames
+  it was drawn on when closed. To look at a window without bringing it to the
+  front (the owner may be using the PC), capture it with `PrintWindow`
+  (flag 3) rather than copying the screen; sending keys needs the window in
+  front, so check `GetForegroundWindow()` first.
 - Git Bash heredocs collapse `\\` to `\` (e.g. `\\.\pipe\...`): write
   scripts with the Write tool, not `cat <<EOF`.
 - Licences: MIT everywhere except `src/framegen/` (MPL-2.0). Every source

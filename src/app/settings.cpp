@@ -143,6 +143,9 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         if (l == L"borderless") s.borderless = true;
         else if (l == L"windowed") s.borderless = false;
         else return bad(L"borderless or windowed");
+    } else if (name == L"launcher.show") {
+        if (!parse_bool(value, b)) return bad(L"1 or 0");
+        s.show_launcher = b;
     } else if (name == L"debug.mpv_log") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.mpv_log = b;
@@ -225,6 +228,11 @@ period = minimum
 [window]
 ; borderless (fills the screen) or windowed.
 mode = borderless
+
+[launcher]
+; 1: Glasir.exe opens its window first (card, picture, enhancements, sound).
+; 0: it plays at once; hold Shift while starting it to see the window.
+show = 1
 
 [debug]
 ; 1: mpv writes a detailed log to logs\mpv.log.
