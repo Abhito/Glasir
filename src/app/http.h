@@ -16,6 +16,7 @@ struct HttpRequest {
     std::wstring url;
     std::vector<std::pair<std::wstring, std::wstring>> headers;  // besides User-Agent
     const std::atomic<bool> *cancel = nullptr;                   // stops the transfer when set
+    int timeout_ms = 0;  // per step (connect, send, receive); 0: 15 s to connect, 30 s for data
     // Called as data arrives: bytes so far, total (0 if the server did not say).
     std::function<void(uint64_t, uint64_t)> progress;
 };

@@ -30,7 +30,7 @@ KEYS
   Ctrl+r                   restart the sound
   F6                       DLSS 5 on/off
   F8                       frame generation on/off
-  F9                       save the frames around now for a bug report
+  F9                       save a bug report, with the frames on screen
   s                        screenshot (in Screenshots\)
   q, Esc                   quit (Esc closes the menu first if it is open)
   Home                     ReShade's overlay (DLSS 5 and effect settings)
@@ -40,9 +40,22 @@ ReShade's overlay (Home): RenoDX-DLSS5's settings are on the Add-ons tab;
 DLSS5_Feed's on the Home tab (untick "Performance Mode" there to edit them).
 Your changes are kept in engine\ReShade.ini and engine\ReShadePreset.ini.
 
-UPDATING THE DOWNLOADED PROGRAMS
+UPDATING
 
-  Glasir.exe --setup       asks again and downloads the newest versions
+When a newer Glasir is out, its window says so under Play: "Update Glasir"
+installs it (your settings stay). [update] check = 0 in glasir.ini stops
+Glasir from asking GitHub.
+
+  Update (in the window)   downloads the newest mpv, ReShade and DLSS 5
+  Glasir.exe --setup       the same, from a command line
+  Glasir.exe --update      installs the newest Glasir
+
+REPORTING A PROBLEM
+
+Press F9 while it happens: a zip with the logs, settings, your GPUs and
+screens (and the frames on screen, with frame generation on) is saved in
+Bug reports\. Your Windows user name is left out. Attach it to an issue at
+https://github.com/Abhito/Glasir/issues and say what you saw.
 
 To remove Glasir, delete its folder.
 

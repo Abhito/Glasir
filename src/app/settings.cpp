@@ -146,6 +146,9 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
     } else if (name == L"launcher.show") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.show_launcher = b;
+    } else if (name == L"update.check") {
+        if (!parse_bool(value, b)) return bad(L"1 or 0");
+        s.update_check = b;
     } else if (name == L"debug.mpv_log") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.mpv_log = b;
@@ -233,6 +236,11 @@ mode = borderless
 ; 1: Glasir.exe opens its window first (card, picture, enhancements, sound).
 ; 0: it plays at once; hold Shift while starting it to see the window.
 show = 1
+
+[update]
+; 1: the window asks GitHub (github.com/Abhito/Glasir) whether a newer Glasir
+; is out, and offers to install it. Nothing is installed unasked.
+check = 1
 
 [debug]
 ; 1: mpv writes a detailed log to logs\mpv.log.

@@ -43,6 +43,8 @@ struct Settings {
     bool borderless = true;
     // [launcher]
     bool show_launcher = true;  // Glasir.exe opens its window first
+    // [update]
+    bool update_check = true;  // the launcher looks for a newer Glasir
     // [debug]
     bool mpv_log = false;
 };

@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <format>
 #include <mutex>
+#include <share.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -434,7 +435,8 @@ void publish(mpv_handle *mpv, const char *key, const std::string &value) {
 
 extern "C" MPV_EXPORT int mpv_open_cplugin(mpv_handle *mpv) {
     const std::string log_path = script_opt(mpv, "glasir_audio-log");
-    if (!log_path.empty()) _wfopen_s(&g_log, widen(log_path).c_str(), L"w");
+    // Shared, so a bug report can read it while playing.
+    if (!log_path.empty()) g_log = _wfsopen(widen(log_path).c_str(), L"w", _SH_DENYNO);
     const std::string device = script_opt(mpv, "glasir_audio-device");
     const bool minimum_period = script_opt(mpv, "glasir_audio-period") != "default";
     int delay = std::clamp(to_int(script_opt(mpv, "glasir_audio-delay"), 0), 0, kMaxDelayMs);

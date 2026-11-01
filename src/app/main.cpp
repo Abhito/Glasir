@@ -14,6 +14,9 @@
 //   Glasir.exe --list
 //   Glasir.exe --version
 //   Glasir.exe --setup [--components mpv,reshade,dlss5] [--no-dialogs]
+//   Glasir.exe --update [--no-dialogs]
+//   Glasir.exe --update-from Glasir-x.y.z.zip [--no-dialogs]
+//   Glasir.exe --bug-report [--no-dialogs]
 //
 // --input-raw reads tightly packed frames from a file or standard input
 // instead of the card (capture.width, capture.height and capture.fps must be
@@ -27,6 +30,13 @@
 // or with --no-dialogs takes --components (default: mpv, ReShade, and DLSS 5
 // if it is there already or the GPU is an RTX 50). The first start does the
 // same when mpv or ReShade is missing.
+//
+// --update installs the newest Glasir from its GitHub releases if it is
+// newer (update.h); --update-from installs a release zip from disk. The
+// launcher offers the same when its update check finds one.
+//
+// --bug-report saves a bug report (bug_report.h) in "Bug reports"; F9 while
+// playing saves one with the frames on screen, and the launcher has a link.
 
 #include <windows.h>
 #include <shellapi.h>
@@ -38,6 +48,7 @@
 #include <cmath>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -46,9 +57,11 @@
 #include "../common/framegen_link.h"
 #include "audio_endpoint.h"
 #include "backdrop.h"
+#include "bug_report.h"
 #include "capture.h"
 #include "components.h"
 #include "devices.h"
+#include "files.h"
 #include "glasir_version.h"
 #include "launcher.h"
 #include "log.h"
@@ -57,6 +70,7 @@
 #include "reshade_config.h"
 #include "settings.h"
 #include "setup_ui.h"
+#include "update.h"
 
 using namespace glasir;
 using Microsoft::WRL::ComPtr;
@@ -74,9 +88,12 @@ struct Args {
     std::wstring input_raw;
     std::wstring raw_format;
     std::wstring components;  // --setup: what to download, comma-separated
+    std::wstring update_from;  // --update-from: a release zip
     bool list = false;
     bool version = false;
     bool setup = false;
+    bool update = false;
+    bool bug_report = false;
     bool from_launcher = false;  // setup asked for in the launcher: it comes back after
     bool play = false;           // no launcher
     bool dialogs = true;
@@ -90,6 +107,13 @@ std::wstring g_error;
 void report(const std::wstring &text) {
     log(L"error: {}", text);
     if (g_error.empty()) g_error = text;
+}
+
+// An error as the end of a sentence: with a full stop unless it has one
+// ("... is the PC online?").
+std::wstring sentence(const std::wstring &text) {
+    if (!text.empty() && (text.back() == L'.' || text.back() == L'?' || text.back() == L'!')) return text;
+    return text + L".";
 }
 
 void show(const std::wstring &text, UINT icon) {
@@ -107,11 +131,6 @@ std::wstring app_dir() {
         path.resize(path.size() * 2);
     }
     return path.substr(0, path.find_last_of(L'\\'));
-}
-
-bool file_exists(const std::wstring &path) {
-    const DWORD a = GetFileAttributesW(path.c_str());
-    return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
 bool parse_args(Args &a, std::wstring &error) {
@@ -136,6 +155,12 @@ bool parse_args(Args &a, std::wstring &error) {
             a.play = true;
         } else if (arg == L"--setup") {
             a.setup = true;
+        } else if (arg == L"--update") {
+            a.update = true;
+        } else if (arg == L"--update-from") {
+            value(a.update_from);
+        } else if (arg == L"--bug-report") {
+            a.bug_report = true;
         } else if (arg == L"--components") {
             value(a.components);
         } else if (arg == L"--no-dialogs") {
@@ -606,8 +631,8 @@ SetupResult setup(const Args &args, const std::wstring &dir, const std::wstring 
     std::wstring error;
     if (!run_setup(engine, which, args.dialogs, error)) {
         if (error != L"cancelled") {
-            const std::wstring text = L"Glasir could not download everything: " + error +
-                                      L".\n\nStart Glasir again to try again. logs\\glasir.log has the details.";
+            const std::wstring text = L"Glasir could not download everything: " + sentence(error) +
+                                      L"\n\nStart Glasir again to try again. logs\\glasir.log has the details.";
             // Shown now: nothing is held yet but the one-instance lock.
             if (args.dialogs) show(text, MB_ICONERROR);
             else report(text);
@@ -651,6 +676,86 @@ void keep_changes(const MpvWatch &watch, const std::wstring &settings_path) {
 // mpv's exit code when the in-game menu asks Glasir to start the picture
 // again (after it changed glasir.ini, e.g. SDR to HDR).
 constexpr DWORD kRestartCode = 42;
+
+// F9 while playing: the frame generation add-on saves the frames on screen,
+// then asks for the rest of the report with "script-message
+// glasir-bug-report <folder> <why>" (no folder: why there are no frames).
+// One report is made at a time; an F9 meanwhile waits for it (the latest).
+class InGameReports {
+public:
+    InGameReports(const std::wstring &dir, const std::wstring &settings, const std::wstring &pipe, MpvProcess &mpv)
+        : dir_(dir), settings_(settings), pipe_(pipe), mpv_(mpv) {}
+    InGameReports(const InGameReports &) = delete;
+    InGameReports &operator=(const InGameReports &) = delete;
+    ~InGameReports() {
+        if (thread_.joinable()) thread_.join();
+    }
+
+    // On MpvWatch's thread.
+    void on_message(const std::vector<std::string> &words) {
+        if (words.front() != "glasir-bug-report") return;
+        Request r{words.size() > 1 ? widen(words[1]) : L"", words.size() > 2 ? words[2] : ""};
+        std::lock_guard lock(m_);
+        if (running_) {
+            pending_ = r;
+            return;
+        }
+        if (thread_.joinable()) thread_.join();  // the last one, finished
+        running_ = true;
+        try {
+            thread_ = std::thread([this, r] { work(r); });
+        } catch (...) {
+            running_ = false;
+        }
+    }
+
+private:
+    struct Request {
+        std::wstring frames;
+        std::string why;
+    };
+
+    void work(Request r) {
+        for (;;) {
+            make(r);
+            std::lock_guard lock(m_);
+            if (!pending_) {
+                running_ = false;
+                return;
+            }
+            r = *pending_;
+            pending_.reset();
+        }
+    }
+
+    void make(const Request &r) {
+        BugReportInput in;
+        in.app_dir = dir_;
+        in.settings_path = settings_;
+        in.frames = r.frames;
+        in.how = L"F9 while playing";
+        std::wstring zip, error;
+        std::wstring text;
+        if (!save_bug_report(in, zip, error)) {
+            log(L"bug report: {}", error);
+            text = L"Could not save a bug report: " + error;
+        } else {
+            text = L"Bug report saved in \"Bug reports\"";
+            if (r.frames.empty())
+                text += r.why == "off"           ? L" (no frames: frame generation is off)"
+                        : r.why == "unavailable" ? L" (no frames: frame generation is not running)"
+                                                 : L" (the frames could not be saved)";
+        }
+        mpv_.send(pipe_, ipc_command({L"show-text", text, L"4000"}), 2000);
+    }
+
+    std::wstring dir_, settings_, pipe_;
+    MpvProcess &mpv_;
+    std::mutex m_;
+    bool running_ = false;
+    std::optional<Request> pending_;
+    std::thread thread_;
+};
 
 // Plays until mpv closes. Returns the exit code; errors go to report().
 // Sets stuck if the capture thread would not end (see wWinMain), restart if
@@ -756,7 +861,9 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
         if (width && height) backdrop.start(mpv.pid(), width, height);
     }
     int rc = 0;
+    InGameReports reports(dir, settings_path, plan.ipc_pipe, mpv);  // after changes stops: it calls this
     MpvWatch changes;
+    changes.on_message = [&reports](const std::vector<std::string> &words) { reports.on_message(words); };
     {
         QuitWatcher watcher(quit_event, mpv);
         const std::wstring target = mpv_load_target(plan);
@@ -930,15 +1037,138 @@ bool launcher_wanted(const Args &args) {
     return s.show_launcher || (GetAsyncKeyState(VK_SHIFT) & 0x8000);
 }
 
-// The launcher until Play (true) or the window is closed (false). Its
-// Download/Update buttons run setup, as --setup does, and come back.
-bool launcher(const Args &args) {
+// glasir.log becomes glasir-previous.log; if it cannot be renamed (open in
+// an editor), it is copied, so the last session is kept either way.
+void keep_previous_log(const std::wstring &log_path, const std::wstring &previous) {
+    if (MoveFileExW(log_path.c_str(), previous.c_str(), MOVEFILE_REPLACE_EXISTING)) return;
+    std::string text;
+    if (!read_shared(log_path, text)) return;
+    HANDLE f = CreateFileW(previous.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    WriteFile(f, text.data(), DWORD(text.size()), &written, nullptr);
+    CloseHandle(f);
+}
+
+// Glasir.exe's arguments, without the program: for starting it again.
+std::vector<std::wstring> own_arguments() {
+    int argc = 0;
+    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    std::vector<std::wstring> out;
+    for (int i = 1; i < argc; ++i) out.push_back(argv[i]);
+    LocalFree(argv);
+    return out;
+}
+
+// Set once an update is installed: the new Glasir.exe is started with this
+// command line as the old one ends (wWinMain).
+std::wstring g_start_after;
+
+// Installs a newer Glasir (with the one-instance lock: a Glasir playing
+// closes first). zip: from disk instead of the release's download.
+bool install_glasir(const Args &args, const Release &release, const std::wstring &zip, std::wstring &error) {
     const std::wstring dir = app_dir();
+    HANDLE quit_event = CreateEventW(nullptr, TRUE, FALSE, kQuitEvent);
+    bool ok = false;
+    {
+        Instance instance(quit_event);
+        if (!instance.take()) {
+            error = L"another Glasir is running and did not close";
+        } else {
+            ok = run_with_progress(
+                L"Glasir update",
+                [&](SetupProgress &progress, const std::atomic<bool> &cancel, std::wstring &e) {
+                    return zip.empty() ? install_update(dir, release, progress, cancel, e)
+                                       : install_update_zip(dir, zip, release.version, progress, cancel, e);
+                },
+                args.dialogs, error);
+        }
+    }
+    CloseHandle(quit_event);
+    if (!ok) log(L"update: not installed: {}", error);
+    return ok;
+}
+
+// --update and --update-from.
+int update_command(const Args &args) {
+    Release release;
+    std::wstring error;
+    int now[3];
+    current_version(now);
+    if (!args.update_from.empty()) {
+        // The version is in the release zip's name: Glasir-x.y.z.zip.
+        const std::wstring name = args.update_from.substr(args.update_from.find_last_of(L"\\/") + 1);
+        const std::wstring stem =
+            name.size() > 11 && name.rfind(L"Glasir-", 0) == 0 ? name.substr(7, name.size() - 11) : L"";
+        if (!parse_version(stem, release.version)) {
+            print(L"--update-from needs a Glasir-x.y.z.zip.\n", args.dialogs);
+            return 2;
+        }
+    } else if (!latest_release(update_repo(), release, error)) {
+        print(L"Could not look for an update: " + sentence(error) + L"\n", args.dialogs);
+        return 1;
+    } else if (!newer(release.version, now)) {
+        print(L"Glasir " + version_text(now) + L" is the newest.\n", args.dialogs);
+        return 0;
+    }
+    if (!install_glasir(args, release, args.update_from, error)) {
+        if (error != L"cancelled")
+            print(L"Glasir could not update: " + sentence(error) + L" The version you have is unchanged.\n",
+                  args.dialogs);
+        return 1;
+    }
+    print(L"Glasir " + version_text(release.version) + L" is installed. Start Glasir again.\n", args.dialogs);
+    return 0;
+}
+
+// A bug report without frames (the launcher's link, --bug-report).
+bool bug_report_now(const Args &args, std::wstring &zip, std::wstring &error, const wchar_t *how) {
+    BugReportInput in;
+    in.app_dir = app_dir();
+    in.settings_path = settings_file(args);
+    in.how = how;
+    in.extra = L"Capture cards:\n" + device_list_text();
+    return save_bug_report(in, zip, error);
+}
+
+void show_in_explorer(const std::wstring &file) {
+    const std::wstring select = L"/select,\"" + file + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
+}
+
+// The launcher until Play (true) or the window is closed (false). Its
+// Download/Update buttons run setup, as --setup does, and come back; its
+// update offer installs the newer Glasir, which then starts in its place.
+bool launcher(const Args &args, UpdateCheck &update) {
+    const std::wstring dir = app_dir();
+    {
+        Settings s;
+        std::wstring error;
+        load_settings(settings_file(args), s, error);
+        if (s.update_check) update.start();
+    }
+    LauncherExtras extras;
+    extras.update = &update;
+    extras.bug_report = [&args](std::wstring &zip, std::wstring &error) {
+        return bug_report_now(args, zip, error, L"from the launcher");
+    };
     for (;;) {
-        const LauncherAction action = run_launcher(settings_file(args), dir + L"\\engine");
-        if (action != LauncherAction::Setup) {
+        const LauncherAction action = run_launcher(settings_file(args), dir + L"\\engine", extras);
+        if (action == LauncherAction::Play || action == LauncherAction::Quit) {
             log(L"launcher: {}", action == LauncherAction::Play ? L"play" : L"closed");
             return action == LauncherAction::Play;
+        }
+        if (action == LauncherAction::SelfUpdate) {
+            std::wstring error;
+            if (install_glasir(args, update.release(), L"", error)) {
+                g_start_after = join_command_line(dir + L"\\Glasir.exe", own_arguments());
+                return false;
+            }
+            if (error != L"cancelled")
+                show(L"Glasir could not update: " + sentence(error) +
+                         L"\n\nThe version you have is unchanged. logs\\glasir.log has the details.",
+                     MB_ICONERROR);
+            continue;
         }
         Args setup_args = args;
         setup_args.setup = setup_args.from_launcher = true;
@@ -977,16 +1207,35 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
     int rc = 0;
     bool stuck = false;
+    UpdateCheck update;  // the launcher's; ends with Glasir, so Play never waits for it
     if (args.list) {
         print(device_list_text(), args.dialogs);
     } else {
         const std::wstring dir = app_dir();
         CreateDirectoryW((dir + L"\\logs").c_str(), nullptr);
-        log_open(dir + L"\\logs\\glasir.log");
+        // The last start's log is kept beside this one (for a bug report).
+        const std::wstring log_path = dir + L"\\logs\\glasir.log";
+        keep_previous_log(log_path, dir + L"\\logs\\glasir-previous.log");
+        log_open(log_path);
         log(L"{} {} ({})", widen(GLASIR_NAME), widen(GLASIR_VERSION), widen(GLASIR_GIT_DESCRIBE));
+        finish_update(dir);
         bool play = true;
-        if (launcher_wanted(args))
-            play = launcher(args);
+        if (args.update || !args.update_from.empty()) {
+            rc = update_command(args);
+            play = false;
+        } else if (args.bug_report) {
+            std::wstring zip;
+            if (bug_report_now(args, zip, error, L"Glasir.exe --bug-report")) {
+                if (args.dialogs) show_in_explorer(zip);
+                else print(L"Bug report saved: " + zip + L"\n", false);
+            } else {
+                print(L"Could not save a bug report: " + error + L"\n", args.dialogs);
+                rc = 1;
+            }
+            play = false;
+        } else if (launcher_wanted(args)) {
+            play = launcher(args, update);
+        }
         if (play)
             for (bool again = false, restart = true; restart && !stuck; again = true) {
                 restart = false;
@@ -1006,5 +1255,21 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     MFShutdown();
     CoUninitialize();
     log_close();
+    if (!g_start_after.empty()) {
+        // The updated Glasir, in this one's place (it waits for this one's
+        // lock, and deletes the old Glasir.exe).
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        std::wstring command = g_start_after;
+        if (CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        } else if (args.dialogs) {
+            show(std::format(L"Glasir is updated, but could not start again (error {}). Start it yourself.",
+                             GetLastError()),
+                 MB_ICONINFORMATION);
+        }
+    }
     return rc;
 }

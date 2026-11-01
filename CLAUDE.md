@@ -42,6 +42,13 @@
   (`--wid`) loses VRR, while the boxed top-level window keeps independent
   flip and VRR. Check presentation changes with PresentMon
   (`MPV-SW-Capture	ools\presentmon`).
+- Updates and bug reports (`src/app/update.cpp`, `bug_report.cpp`): the repo
+  is private, so the update check gets 404 until it is public with a
+  release. Test with `GLASIR_UPDATE_TEST_RELEASE=<release.json>` (GitHub's
+  answer from a file), `GLASIR_UPDATE_REPO=owner/name`, and
+  `Glasir.exe --update-from out\Glasir-x.y.z.zip` on a copy of the app folder
+  (never on out\Glasir while the owner uses it). F9 can be posted to mpv's
+  window (class `mpv`) without focus; reports go to `Bug reports\`.
 - Git Bash heredocs collapse `\\` to `\` (e.g. `\\.\pipe\...`): write
   scripts with the Write tool, not `cat <<EOF`.
 - Licences: MIT everywhere except `src/framegen/` (MPL-2.0). Every source

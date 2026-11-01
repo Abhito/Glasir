@@ -9,12 +9,16 @@
 #include <vector>
 
 #include "backdrop.h"
+#include "bug_report.h"
 #include "components.h"
 #include "devices.h"
+#include "glasir_version.h"
 #include "json.h"
+#include "log.h"
 #include "mpv_launch.h"
 #include "reshade_config.h"
 #include "settings.h"
+#include "update.h"
 
 using namespace glasir;
 
@@ -357,7 +361,6 @@ int main() {
                "watch: changed values");
         expect(!watch.changed("user-data/glasir/audio-delay"), "watch: changed and back is no change");
     }
-    std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
     {
         // Full screen: where the picture goes on the monitor (backdrop.h).
         auto same = [](const RECT &r, LONG l, LONG t, LONG rr, LONG b) {
@@ -375,5 +378,54 @@ int main() {
                "1366x768 is 16:9 but for rounding: the whole screen");
         expect(same(fit_picture(RECT{0, 0, 3440, 1440}, 0, 0), 0, 0, 3440, 1440), "no picture size: the whole screen");
     }
+    {
+        // Updates (update.h): versions and GitHub's release answer.
+        int v[3] = {};
+        expect(parse_version(L"v0.2.10", v) && v[0] == 0 && v[1] == 2 && v[2] == 10, "version v0.2.10");
+        expect(parse_version(L"1.0.0", v) && v[0] == 1, "version without v");
+        expect(!parse_version(L"v1.0.0-rc1", v) && !parse_version(L"v1.0", v) && !parse_version(L"", v),
+               "pre-release and short tags are no version");
+        const int a[3] = {0, 2, 0}, b[3] = {0, 1, 9}, c[3] = {0, 2, 0};
+        expect(newer(a, b) && !newer(b, a) && !newer(a, c), "0.2.0 is newer than 0.1.9, not than itself");
+        int now[3];
+        current_version(now);
+        expect(version_text(now) == widen(GLASIR_VERSION), "this build's version");
+
+        const std::string digest(64, 'a');
+        const std::string release = R"({"tag_name":"v0.2.0","html_url":"https://github.com/Abhito/Glasir/releases/tag/v0.2.0",
+            "draft":false,"prerelease":false,"assets":[
+            {"name":"Glasir-0.2.0.zip.sig","browser_download_url":"https://x/sig","size":10,"digest":null},
+            {"name":"Glasir-0.2.0.zip","browser_download_url":"https://x/zip","size":900000,"digest":"sha256:)" +
+                                    digest + R"("}]})";
+        Release r;
+        std::wstring error;
+        expect(read_release(release, r, error) && r.version[1] == 2 && r.zip_url == L"https://x/zip" &&
+                   r.zip_size == 900000 && r.zip_sha256 == digest && r.zip_name == L"Glasir-0.2.0.zip",
+               "release: the zip of its version, with its SHA-256");
+        expect(!read_release(R"({"tag_name":"v0.3.0","assets":[{"name":"Glasir-0.2.0.zip","browser_download_url":"https://x"}]})",
+                             r, error),
+               "release: a zip of another version is not it");
+        expect(!read_release(R"({"tag_name":"v0.3.0","prerelease":true,"assets":[]})", r, error),
+               "release: a pre-release is not offered");
+        expect(!read_release("not json", r, error), "release: not JSON");
+    }
+    {
+        // Bug reports: the profile folder is left out, whatever its spelling.
+        const std::wstring profile = L"C:\\Users\\Someone";
+        expect(redact_profile("open C:\\Users\\Someone\\Documents\\x.ini and c:\\users\\SOMEONE\\y", profile) ==
+                   "open %USERPROFILE%\\Documents\\x.ini and %USERPROFILE%\\y",
+               "redact: backslashes, any case");
+        expect(redact_profile("C:/Users/Someone/a {\"p\":\"C:\\\\Users\\\\Someone\\\\b\"}", profile) ==
+                   "%USERPROFILE%/a {\"p\":\"%USERPROFILE%\\\\b\"}",
+               "redact: slashes and JSON's doubled backslashes");
+        expect(redact_profile("C:\\Users\\Someone2", L"C:\\") == "C:\\Users\\Someone2", "redact: no real profile");
+    }
+    {
+        Settings s;
+        std::wstring error;
+        expect(s.update_check && apply_override(s, L"update.check=0", error) && !s.update_check,
+               "update.check, on by default");
+    }
+    std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
     return g_failures ? 1 : 0;
 }

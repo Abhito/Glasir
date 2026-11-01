@@ -334,21 +334,20 @@ Link g_link;
 
 // ---- mpv OSD ------------------------------------------------------------------
 
-// Shows a line in mpv's OSD through its IPC pipe, on a thread of its own so the
-// render thread never waits on the pipe. The thread holds a reference to this
-// module and drops it on exit, so mpv closing meanwhile cannot unload the code
-// under it. The texts are fixed strings here, so they need no JSON escaping.
-void mpv_show_text(const char *text) {
+// Sends one IPC line to mpv, on a thread of its own so the render thread never
+// waits on the pipe. The thread holds a reference to this module and drops it
+// on exit, so mpv closing meanwhile cannot unload the code under it.
+void mpv_send(const std::string &line) {
     struct Job {
         std::wstring pipe;
         std::string line;
     };
     auto *job = new Job;
     job->pipe = L"\\\\.\\pipe\\" + std::wstring(g_settings.mpv_pipe.begin(), g_settings.mpv_pipe.end());
-    job->line = std::string("{\"command\":[\"show-text\",\"") + text + "\",1500]}\n";
+    job->line = line;
 
     HMODULE self = nullptr;
-    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&mpv_show_text), &self)) {
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&mpv_send), &self)) {
         delete job;
         return;
     }
@@ -367,7 +366,7 @@ void mpv_show_text(const char *text) {
         delete job;
         HMODULE module = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCWSTR>(&mpv_show_text), &module);
+                           reinterpret_cast<LPCWSTR>(&mpv_send), &module);
         FreeLibraryAndExitThread(module, 0);
     };
     HANDLE thread = CreateThread(nullptr, 0, run, job, 0, nullptr);
@@ -377,6 +376,31 @@ void mpv_show_text(const char *text) {
         delete job;
         FreeLibrary(self);
     }
+}
+
+// A line in mpv's OSD. The texts are fixed strings here, so they need no JSON
+// escaping.
+void mpv_show_text(const char *text) {
+    mpv_send(std::string("{\"command\":[\"show-text\",\"") + text + "\",1500]}\n");
+}
+
+// Asks Glasir.exe (an IPC client of mpv) to save a bug report, with the
+// frames in folder; mpv passes script messages on to its clients. Without
+// frames, why says why not: "off" (frame generation is off), "unavailable"
+// (it cannot run here) or "failed" (they could not be saved).
+void mpv_bug_report(const std::wstring &folder, const char *why = "") {
+    std::string utf8;
+    if (!folder.empty()) {
+        const int n = WideCharToMultiByte(CP_UTF8, 0, folder.data(), int(folder.size()), nullptr, 0, nullptr, nullptr);
+        utf8.resize(size_t(n > 0 ? n : 0));
+        WideCharToMultiByte(CP_UTF8, 0, folder.data(), int(folder.size()), utf8.data(), n, nullptr, nullptr);
+    }
+    std::string quoted;
+    for (char c : utf8) {
+        if (c == '\\' || c == '"') quoted += '\\';
+        quoted += c;
+    }
+    mpv_send("{\"command\":[\"script-message\",\"glasir-bug-report\",\"" + quoted + "\",\"" + why + "\"]}\n");
 }
 
 // ---- Capture ------------------------------------------------------------------
@@ -404,8 +428,10 @@ public:
     // Nothing is shown on mpv's OSD here: mpv draws it into the back buffer,
     // and it would be in the frames being captured.
     // pq: the back buffer holds HDR10 (PQ) values, not SDR ones.
-    bool start(ID3D11Device *device, const D3D11_TEXTURE2D_DESC &bb, bool pq) {
+    // report: a bug report waits for the frames (the key, not a timed test).
+    bool start(ID3D11Device *device, const D3D11_TEXTURE2D_DESC &bb, bool pq, bool report) {
         reset();
+        report_ = report;
         if (bb.Format != DXGI_FORMAT_R10G10B10A2_UNORM && bb.Format != DXGI_FORMAT_R8G8B8A8_UNORM &&
             bb.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
             log_line(reshade::log::level::warning, "capture: back buffer format %d is not one it can save", bb.Format);
@@ -461,6 +487,8 @@ public:
         job->height = desc_.Height;
         job->format = desc_.Format;
         job->deep = desc_.Format == DXGI_FORMAT_R10G10B10A2_UNORM && pq_;
+        job->report = report_;
+        report_ = false;  // the write thread sends it now
         for (auto &shot : shots_) {
             D3D11_MAPPED_SUBRESOURCE map{};
             if (FAILED(ctx->Map(shot.staging.Get(), 0, D3D11_MAP_READ, 0, &map))) continue;
@@ -477,9 +505,13 @@ public:
         write(job);
     }
 
-    void reset() {
+    // Stops a capture under way; a bug report waiting for it is made without
+    // frames (tell = false: mpv is closing, no one to tell).
+    void reset(bool tell = true) {
+        if (tell && report_ && (active_ || wait_ >= 0)) mpv_bug_report(L"", "failed");
         shots_.clear();
         device_.Reset();
+        report_ = false;
         active_ = false;
         reals_ = 0;
         wait_ = -1;
@@ -500,6 +532,7 @@ private:
         UINT width = 0, height = 0;
         DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
         bool deep = false;  // 16-bit PNG (10-bit PQ); otherwise 8-bit
+        bool report = false;  // a bug report waits for the frames
         std::vector<Image> images;
     };
 
@@ -519,15 +552,22 @@ private:
     static void write(Job *job) {
         HMODULE self = nullptr;
         if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&Capture::write), &self)) {
+            if (job->report) mpv_bug_report(L"", "failed");
             delete job;
             return;
         }
         auto run = [](LPVOID param) -> DWORD {
             auto *job = static_cast<Job *>(param);
             const std::wstring folder = save(*job);
+            const bool report = job->report;
             delete job;
-            mpv_show_text(folder.empty() ? "Frame generation: capture failed, see ReShade.log"
-                                         : "Frame generation: frames saved to Captures");
+            if (report) {
+                if (folder.empty()) mpv_show_text("Frame generation: could not save the frames, see ReShade.log");
+                mpv_bug_report(folder, folder.empty() ? "failed" : "");  // Glasir.exe says when it is saved
+            } else {
+                mpv_show_text(folder.empty() ? "Frame generation: capture failed, see ReShade.log"
+                                             : "Frame generation: frames saved to Captures");
+            }
             HMODULE module = nullptr;
             GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                                reinterpret_cast<LPCWSTR>(&Capture::write), &module);
@@ -537,6 +577,7 @@ private:
         if (thread) {
             CloseHandle(thread);
         } else {
+            if (job->report) mpv_bug_report(L"", "failed");
             delete job;
             FreeLibrary(self);
         }
@@ -629,6 +670,7 @@ private:
     ComPtr<ID3D11Device> device_;
     D3D11_TEXTURE2D_DESC desc_{};
     bool pq_ = false;
+    bool report_ = false;
     wchar_t stamp_[32] = {};
     std::vector<Shot> shots_;
     bool active_ = false;
@@ -1195,7 +1237,7 @@ public:
     void release_held() { hold_.release_all(); }
 
     void release() {
-        capture_.reset();
+        capture_.reset(false);
         for (auto &t : frames_) t.Reset();
         for (auto &v : views_) v.Reset();
         interp_.release();
@@ -1559,10 +1601,15 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
         glasir::overlay::menu_open() && g_link.linked() && g_link.since_last(now) > 0.25;
     if (g_link.linked())
         g_link.send_repeats(still_menu || (!g_settings.dedup_when_off && (broken_ || !g_settings.enabled)));
+    // Also with the in-game menu open (it is drawn after the frames saved).
+    const bool capture_key =
+        g_settings.capture_key > 0 && runtime->is_key_pressed(static_cast<uint32_t>(g_settings.capture_key));
     if (broken_ || !g_settings.enabled || !source_ok()) {
         last_real_ = now;
         generated_last_ = false;
         if (capture_.active()) capture_.reset();  // its frames would not be in a row
+        // No frames to save: the bug report comes without them.
+        if (capture_key && !capture_.busy()) mpv_bug_report(L"", g_settings.enabled ? "unavailable" : "off");
         return;
     }
 
@@ -1691,9 +1738,11 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
     }
     const bool timed = capture_after_ > 0 && now >= capture_after_;
     if (timed) capture_after_ = 0;
-    if (g_settings.capture_key > 0 && !capture_.busy() &&
-        (timed || runtime->is_key_pressed(static_cast<uint32_t>(g_settings.capture_key)))) {
-        if (!capture_.start(device_.Get(), bb, pq())) mpv_show_text("Frame generation: cannot capture this picture format");
+    if (!capture_.busy() && (timed || capture_key)) {
+        if (!capture_.start(device_.Get(), bb, pq(), !timed)) {
+            mpv_show_text("Frame generation: cannot capture this picture format");
+            if (!timed) mpv_bug_report(L"", "failed");
+        }
     }
     if (pending_) capture_.between(context_.Get(), back_buffer.Get());  // it holds the frame in between now
     capture_.real(context_.Get(), frames_[cur].Get());

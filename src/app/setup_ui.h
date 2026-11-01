@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // The setup windows: which components to download, and the download itself.
 #pragma once
+#include <atomic>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -18,6 +20,11 @@ struct SetupChoice {
 
 // Asks what to download. nullopt if the user said no.
 std::optional<std::vector<Component>> ask_setup(const SetupChoice &choice);
+
+// A job with a progress window (dialogs; Cancel sets cancel) or without.
+// False with error set if it failed or was cancelled ("cancelled").
+using ProgressJob = std::function<bool(SetupProgress &, const std::atomic<bool> &, std::wstring &)>;
+bool run_with_progress(const wchar_t *title, const ProgressJob &job, bool dialogs, std::wstring &error);
 
 // Downloads and installs with a progress window (dialogs) or only the log.
 // False with error set if it failed or was cancelled ("cancelled").

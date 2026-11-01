@@ -25,8 +25,7 @@ HRESULT CALLBACK links(HWND, UINT note, WPARAM, LPARAM lparam, LONG_PTR) {
 std::wstring megabytes(uint64_t bytes) { return std::format(L"{:.0f} MB", bytes / 1048576.0); }
 
 struct Run {
-    std::wstring engine;
-    std::vector<Component> which;
+    ProgressJob job;
     SetupProgress progress;
     std::atomic<bool> cancel{false};
     std::atomic<bool> done{false};
@@ -38,7 +37,7 @@ struct Run {
 };
 
 void work(Run &run) {
-    run.ok = install_components(run.engine, run.which, run.progress, run.cancel, run.error);
+    run.ok = run.job(run.progress, run.cancel, run.error);
     run.done = true;
 }
 
@@ -126,21 +125,16 @@ std::optional<std::vector<Component>> ask_setup(const SetupChoice &choice) {
     return which;
 }
 
-bool run_setup(const std::wstring &engine_dir, const std::vector<Component> &which, bool dialogs,
-               std::wstring &error) {
-    std::wstring names;
-    for (Component c : which) names += (names.empty() ? L"" : L", ") + std::wstring(component_name(c));
-    log(L"setup: downloading {}", names);
+bool run_with_progress(const wchar_t *title, const ProgressJob &job, bool dialogs, std::wstring &error) {
     Run run;
-    run.engine = engine_dir;
-    run.which = which;
+    run.job = job;
     if (!dialogs) {
         work(run);
     } else {
         TASKDIALOGCONFIG c{};
         c.cbSize = sizeof(c);
         c.dwFlags = TDF_SHOW_PROGRESS_BAR | TDF_CALLBACK_TIMER | TDF_SIZE_TO_CONTENT;
-        c.pszWindowTitle = L"Glasir setup";
+        c.pszWindowTitle = title;
         c.pszMainInstruction = L"Starting";
         // Room for "Part 3 of 3: 120 MB of 250 MB" without the window resizing.
         c.pszContent = L"                                                                        ";
@@ -152,16 +146,30 @@ bool run_setup(const std::wstring &engine_dir, const std::vector<Component> &whi
         if (run.worker.joinable()) {
             run.worker.join();
         } else if (FAILED(hr)) {
-            log(L"setup: no progress window ({})", hresult_text(hr));
+            log(L"no progress window ({})", hresult_text(hr));
             work(run);
         }
     }
     error = run.error;
-    if (run.ok)
+    return run.ok;
+}
+
+bool run_setup(const std::wstring &engine_dir, const std::vector<Component> &which, bool dialogs,
+               std::wstring &error) {
+    std::wstring names;
+    for (Component c : which) names += (names.empty() ? L"" : L", ") + std::wstring(component_name(c));
+    log(L"setup: downloading {}", names);
+    const bool ok = run_with_progress(
+        L"Glasir setup",
+        [&](SetupProgress &progress, const std::atomic<bool> &cancel, std::wstring &e) {
+            return install_components(engine_dir, which, progress, cancel, e);
+        },
+        dialogs, error);
+    if (ok)
         log(L"setup: done");
     else
-        log(L"setup: stopped: {}", run.error);
-    return run.ok;
+        log(L"setup: stopped: {}", error);
+    return ok;
 }
 
 }  // namespace glasir

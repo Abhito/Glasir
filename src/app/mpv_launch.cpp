@@ -401,6 +401,15 @@ void MpvWatch::stop() {
 }
 
 void MpvWatch::on_line(const std::string &line) {
+    if (on_message && line.find("\"client-message\"") != std::string::npos) {
+        const auto j = Json::parse(line);
+        if (!j || j->str("event") != "client-message") return;
+        std::vector<std::string> words;
+        if (const Json *args = j->get("args"))
+            for (const Json &a : args->items()) words.push_back(a.string());
+        if (!words.empty()) on_message(words);
+        return;
+    }
     if (line.find("\"property-change\"") == std::string::npos) return;
     const auto j = Json::parse(line);
     if (!j || j->str("event") != "property-change") return;

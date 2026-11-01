@@ -58,7 +58,10 @@ bool transfer(const HttpRequest &r, const std::function<bool(const char *, DWORD
         error = winhttp_error(GetLastError());
         return false;
     }
-    WinHttpSetTimeouts(session.h, 15000, 15000, 30000, 30000);
+    if (r.timeout_ms > 0)
+        WinHttpSetTimeouts(session.h, r.timeout_ms, r.timeout_ms, r.timeout_ms, r.timeout_ms);
+    else
+        WinHttpSetTimeouts(session.h, 15000, 15000, 30000, 30000);
     Handle connection(WinHttpConnect(session.h, host, parts.nPort, 0));
     const std::wstring object = std::wstring(path) + extra;
     Handle request(connection.h ? WinHttpOpenRequest(connection.h, L"GET", object.c_str(), nullptr, WINHTTP_NO_REFERER,

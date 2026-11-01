@@ -3,6 +3,7 @@
 #pragma once
 #include <windows.h>
 
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -101,6 +102,9 @@ public:
     // The property's last value if it changed since the first one seen
     // (numbers as written by mpv, strings as they are).
     std::optional<std::string> changed(const std::string &property) const;
+    // Called (on the watch's thread) with the words of each script-message
+    // mpv passes on to its clients. Set before start().
+    std::function<void(const std::vector<std::string> &)> on_message;
 
     // What start() does before it connects, and one IPC line: for the tests.
     void track(const std::vector<std::string> &properties);

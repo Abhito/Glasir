@@ -268,7 +268,8 @@ bool draw_menu(const MenuFrame &f) {
     if (ImGui::Button("Close", ImVec2(half, 0))) keep = false;
     ImGui::SameLine();
     if (ImGui::Button("Quit Glasir", ImVec2(half, 0))) f.mpv->command({"quit"});
-    note("Tab or Esc: close   \xC2\xB7   F6: DLSS 5   \xC2\xB7   F8: frame generation");
+    note("Tab or Esc: close   \xC2\xB7   F6: DLSS 5   \xC2\xB7   F8: frame generation   \xC2\xB7   "
+         "F9: save a bug report");
     ImGui::End();
     return keep;
 }

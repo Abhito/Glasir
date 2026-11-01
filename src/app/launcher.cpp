@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <dwmapi.h>
+#include <shellapi.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -28,6 +29,7 @@
 #include "log.h"
 #include "settings.h"
 #include "ui_style.h"
+#include "update.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -289,6 +291,34 @@ void row(const char *label) {
     ImGui::SetNextItemWidth(-1);
 }
 
+// "Save a bug report", on a thread of its own (it takes a second or two).
+struct BugReport {
+    enum State { Idle, Saving, Saved, Failed };
+    std::atomic<int> state{Idle};
+    std::wstring error;  // Failed (set before state)
+    std::thread thread;
+    ~BugReport() {
+        if (thread.joinable()) thread.join();
+    }
+    void start(const std::function<bool(std::wstring &, std::wstring &)> &save) {
+        if (state == Saving) return;
+        if (thread.joinable()) thread.join();
+        state = Saving;
+        thread = std::thread([this, save] {
+            std::wstring zip, e;
+            if (save(zip, e)) {
+                // Explorer shows it, chosen, ready to be dragged into a message.
+                const std::wstring select = L"/select,\"" + zip + L"\"";
+                ShellExecuteW(nullptr, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
+                state = Saved;
+            } else {
+                error = e;
+                state = Failed;
+            }
+        });
+    }
+};
+
 struct Screen {
     Choice c;
     const Choice original;
@@ -296,6 +326,9 @@ struct Screen {
     bool dlss5_installed = false;
     bool dlss5_forced = false;  // glasir.ini: [dlss5] enabled = on (try without an RTX 50)
     std::string versions;  // "mpv 20261031  ·  ReShade 6.8.0  ·  DLSS 5 10.8.0", "" if none
+    const LauncherExtras *extras = nullptr;
+    Release release;  // the newer Glasir, once the update check found one
+    BugReport *bug = nullptr;
     float content_height = 0;  // what the window needs, in pixels
     LauncherAction action = LauncherAction::Quit;
     bool finished = false;
@@ -476,6 +509,39 @@ void draw(Screen &s) {
             s.finished = true;
         }
     }
+    if (s.extras && s.extras->update && s.extras->update->state() == UpdateCheck::State::Available) {
+        if (s.release.tag.empty()) s.release = s.extras->update->release();
+        ImGui::AlignTextToFramePadding();
+        ImGui::PushStyleColor(ImGuiCol_Text, ui::kGold);
+        ImGui::TextUnformatted(("Glasir " + narrow(version_text(s.release.version)) + " is out.").c_str());
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Update Glasir")) {
+            s.action = LauncherAction::SelfUpdate;
+            s.finished = true;
+        }
+        if (!s.release.page.empty()) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("What's new"))
+                ShellExecuteW(nullptr, L"open", s.release.page.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+    }
+    if (s.extras && s.extras->bug_report && s.bug) {
+        const int state = s.bug->state.load();
+        ImGui::AlignTextToFramePadding();
+        if (state == BugReport::Saving) {
+            dim("Saving a bug report...");
+        } else {
+            if (ImGui::SmallButton("Save a bug report")) s.bug->start(s.extras->bug_report);
+            ImGui::SameLine();
+            if (state == BugReport::Saved)
+                dim("Saved in \"Bug reports\" (logs, settings and the PC; no user name).");
+            else if (state == BugReport::Failed)
+                dim("Could not save it: " + narrow(s.bug->error));
+            else
+                dim("F9 while playing adds the frames on screen.");
+        }
+    }
     s.content_height = ImGui::GetCursorPosY() + ImGui::GetStyle().WindowPadding.y;
     ImGui::End();
 }
@@ -547,7 +613,9 @@ std::string windows_font(const char *file) {
 
 }  // namespace
 
-LauncherAction run_launcher(const std::wstring &settings_path, const std::wstring &engine_dir) {
+LauncherAction run_launcher(const std::wstring &settings_path, const std::wstring &engine_dir,
+                            const LauncherExtras &extras) {
+    BugReport bug;  // joined last, after the window is gone
     Settings settings;
     std::wstring error;
     if (!load_settings(settings_path, settings, error)) log(L"launcher: {}", error);  // shown again on Play
@@ -581,6 +649,8 @@ LauncherAction run_launcher(const std::wstring &settings_path, const std::wstrin
     screen.dlss5_installed = component_installed(engine_dir, Component::Dlss5);
     screen.dlss5_forced = settings.dlss5 == Settings::Dlss5::On;
     screen.versions = versions_line(engine_dir);
+    screen.extras = &extras;
+    screen.bug = &bug;
     float style_scale = 0;
 
     while (!screen.finished && !w.closed) {

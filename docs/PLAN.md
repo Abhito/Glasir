@@ -127,4 +127,7 @@ Each step tested against the real capture card before the next:
    [launcher] show / Shift / --play. Still to do: the key-press OSD texts (volume,
    boost, F8...) go through mpv's OSD, so through DLSS 5 and frame generation;
    they could move into the overlay)*
-8. Update check / self-update, bug-report capture, docs.
+8. Update check / self-update, bug-report capture, docs. *(done: update
+   check in the launcher + `--update`, self-update from the release zip with
+   SHA-256 and rollback; F9 / launcher / `--bug-report` save a zip with logs,
+   settings, system and F9 frames; README sections + docs/TROUBLESHOOTING.md)*

@@ -36,10 +36,25 @@ latency and modern enhancements applied live:
    [NVIDIA DLSS](https://github.com/NVIDIA/DLSS), LumeniteFX). Downloads are
    checked against their published SHA-256 hashes, and NVIDIA's DLL against
    NVIDIA's signature.
-3. Later, `Glasir.exe --setup` downloads the newest versions.
-   `engine\components.ini` says which are installed.
+3. Later, the **Update** button in Glasir's window (or `Glasir.exe --setup`)
+   downloads their newest versions. `engine\components.ini` says which are
+   installed.
 
 To remove Glasir, delete its folder.
+
+### Updating Glasir
+
+When a newer Glasir is out, its window says so under **Play**: **Update
+Glasir** downloads it from [Glasir's releases](https://github.com/Abhito/Glasir/releases),
+checks it against the SHA-256 GitHub publishes for it, installs it and starts
+the new version. Your settings (`glasir.ini`), screenshots, logs and the
+downloaded programs stay as they are. If anything goes wrong on the way,
+the version you have stays as it was. **What's new** opens the release's
+page.
+
+Glasir asks GitHub only when its window opens; `[update] check = 0` in
+`glasir.ini` turns that off. `Glasir.exe --update` looks and installs from a
+command line.
 
 ## Using it
 
@@ -81,7 +96,7 @@ scaling at all.
 | `Ctrl+r` | restart the sound (after changing the output device) |
 | `F6` | DLSS 5 neural rendering on/off (this session) |
 | `F8` | frame generation on/off (this session; needs ReShade) |
-| `F9` | save the frames around now for a bug report (in `Captures\`) |
+| `F9` | save a bug report, with the frames on screen (in `Bug reports\`) |
 | `s` | screenshot (in `Screenshots\`) |
 | `q`, `Esc` | quit (`Esc` closes the menu first when it is open) |
 | `Home` | ReShade's overlay |
@@ -94,6 +109,22 @@ DLSS 5 on or off there.
 
 Logs are in `logs\` (`glasir.log`, `audio.log`); ReShade, frame
 generation and DLSS 5 log to `engine\ReShade.log` (and `engine\dlss5-feed.log`).
+
+### Something wrong?
+
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) covers the usual
+questions: frame generation not doubling, VRR, HDR, the black bars.
+
+To report a problem, press **F9** while it is happening: Glasir saves a bug
+report in `Bug reports\`, a zip with the logs, the settings, what is
+installed, your PC's GPUs, drivers and screens, and (with frame generation
+on) the frames on screen at that moment. **Save a bug report** in Glasir's
+window, or `Glasir.exe --bug-report`, saves one without frames. Paths in it
+have your user folder replaced by `%USERPROFILE%`, so your Windows user name
+is not in it. Attach the zip to an issue on
+[GitHub](https://github.com/Abhito/Glasir/issues) and say what you saw. (A
+report with frames is 10-100 MB: too big for an issue, so share it through a
+file host.)
 
 ## Building
 
@@ -115,6 +146,12 @@ out\Glasir\Glasir.exe --list                 # the capture cards and their modes
 ```
 
 `--setup --no-dialogs --components mpv,reshade,dlss5` picks what to download.
+
+Releases: `build.cmd package` makes `out\Glasir-x.y.z.zip` (the version is
+set in the root `CMakeLists.txt`). Publish it as an asset of a GitHub release
+tagged `vx.y.z`; the update check finds the newest release's
+`Glasir-x.y.z.zip` and GitHub's SHA-256 for it. `Glasir.exe --update-from
+Glasir-x.y.z.zip` installs a zip from disk (to try one before publishing).
 
 Testing without a capture card (needs ffmpeg and Python):
 
