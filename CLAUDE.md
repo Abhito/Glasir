@@ -19,6 +19,8 @@
   so you can look at them (downscale before viewing: 2560x1440 PNGs).
   Both open a window for a few seconds. Glasir allows one instance; its IPC
   pipe is `\\.\pipe\glasir`.
+- Frame generation: read docs/FRAMEGEN-LEARNINGS.md first (what was tried,
+  dead ends, how to judge changes: across all captures, never one).
 - Frame generation (`src/framegen`, MPL-2.0, design in its README.md): after a
   change to the shaders or `fg_interp.h`, compare `fg_eval.exe` scores before
   and after (clips/captures stay outside the repo; the prototype's are in

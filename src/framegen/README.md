@@ -6,7 +6,9 @@ Frame generation inside mpv, with no second app running: the ReShade add-on
 `zz-glasir-framegen.addon64` (this folder, Mozilla Public License 2.0) and
 Glasir's dedup feeding it. This is the design document carried over from the
 prototype (MPV-SW-Capture's FrameGen work, 2026-10-24 to 10-31): the
-measurements below were taken there, with the same code.
+measurements below were taken there, with the same code. What was tried
+on the way, the research rounds, the depth experiment and the dead ends are
+in [docs/FRAMEGEN-LEARNINGS.md](../../docs/FRAMEGEN-LEARNINGS.md).
 
 ## What it does
 
