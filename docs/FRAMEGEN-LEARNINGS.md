@@ -254,8 +254,7 @@ implementations in private copies, scored with the same tools.
 - **Neural interpolation:**
   - RIFE-class networks need ~16–26 ms at 1440p, far over budget;
   - they are trained on photometric error, the same tie the shader loses.
-- **NVIDIA Maxine Video Frame Generation (VFG)**, looked at again 11-01 from
-  Veyra's notes:
+- **NVIDIA Maxine Video Frame Generation (VFG):**
   - RTX 40/50 only, 2–8x, Low/Medium/High;
   - CUDA, so D3D11 ↔ CUDA sharing would be needed;
   - the runtime (~435 MB) is anonymous from NVIDIA's Python index, but the C
