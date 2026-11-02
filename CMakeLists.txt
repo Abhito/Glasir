@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.25)
 # The product name and version live here and nowhere else; code gets them
 # from the generated glasir_version.h.
 project(Glasir
-    VERSION 0.1.1
+    VERSION 0.1.2
     DESCRIPTION "Modern PC graphics for game consoles through a capture card"
     HOMEPAGE_URL "https://github.com/Abhito/Glasir"
     LANGUAGES CXX)
