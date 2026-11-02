@@ -37,13 +37,18 @@
   The launcher can be driven without focus by posting WM_KEYDOWN/WM_KEYUP
   (ImGui keyboard navigation: arrows, Space); posted mouse clicks are not
   reliable, as Windows sends WM_MOUSELEAVE when the real cursor is elsewhere.
-- Borderless full screen on a screen of another shape (the owner's is
-  3440x1440) sizes mpv's window to the picture and puts a black window of
-  Glasir's behind it (`src/app/backdrop.cpp`), so DLSS 5 and frame gen skip
-  the bars. Keep mpv a top-level window: PresentMon showed a child window
-  (`--wid`) loses VRR, while the boxed top-level window keeps independent
-  flip and VRR. Check presentation changes with PresentMon
-  (`MPV-SW-Capture	ools\presentmon`).
+- mpv's window (`src/app/backdrop.cpp`, Glasir's own thread): borderless
+  full screen covers the whole monitor, black bars included, by default.
+  `[window] skip_black_bars = 1` (launcher: "Skip the black bars") sizes
+  mpv's top-level window to the picture with a black window of Glasir's
+  behind it. A window smaller than the monitor (that, or a child window,
+  `--wid`) keeps independent flip only while Windows gives it an overlay
+  plane (MPO); on the owner's PC that stopped after a reboot (11-01, cause
+  not found), it was composed and frame gen fell to ~100 of 120 fps, so it
+  is off by default. The menu's "Show as" posts `script-message
+  glasir-window borderless|windowed`; Glasir sets mpv's `border` over IPC and
+  places the window (test it over IPC the same way). Check presentation
+  changes with PresentMon (`MPV-SW-Capture\tools\presentmon`).
 - Updates and bug reports (`src/app/update.cpp`, `bug_report.cpp`): the repo
   is public and releases are real (v0.1.0 first); publishing one is the
   owner's call. Test with `GLASIR_UPDATE_TEST_RELEASE=<release.json>` (GitHub's

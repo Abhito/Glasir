@@ -32,6 +32,7 @@ struct Synced {
 struct MenuState {
     int last_frame = -10;
     Synced volume, boost, delay;
+    int borderless = -1;  // full screen (1) or a window (0) since the menu switched it; -1: as mpv started
 };
 MenuState g_menu;
 
@@ -230,9 +231,22 @@ void sound(const MenuFrame &f, const MpvState &mpv, double now) {
 
 void display(const MenuFrame &f, const MpvState &mpv) {
     section("DISPLAY");
-    bool full = mpv.fullscreen;
-    if (ImGui::Checkbox("Full screen", &full)) f.mpv->command({"set", "fullscreen", full ? "yes" : "no"});
+    // Glasir moves mpv's window (and the black around a picture of another
+    // shape than the screen); mpv changes its border.
+    const bool borderless = g_menu.borderless < 0 ? f.borderless : g_menu.borderless == 1;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Show as");
+    for (const bool choice : {true, false}) {
+        ImGui::SameLine();
+        if (ImGui::RadioButton(choice ? "Full screen" : "Window", borderless == choice) &&
+            (borderless != choice || mpv.fullscreen)) {
+            g_menu.borderless = choice ? 1 : 0;
+            f.mpv->command({"script-message", "glasir-window", choice ? "borderless" : "windowed"});
+            save(f, "window", "mode", choice ? "borderless" : "windowed");
+        }
+    }
     const bool hdr = f.source_hdr;
+    if (!hdr && !f.hdr_available) return;  // a card without HDR modes: nothing to switch to
     if (ImGui::Button(hdr ? "Switch to SDR" : "Switch to HDR", ImVec2(-1, 0))) {
         // Glasir starts the picture again in the other mode (mpv's exit
         // code 42 asks for that).

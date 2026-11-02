@@ -46,8 +46,10 @@ Keep / build:
   DLSS / FSR upscaling later, enabled by compatibility. *(done: [video]
   scaling = mpv | fsr | vsr, glasir_scaling.lua + Glasir's own FSR 1 port;
   launcher and menu)*
-- Screenshots; window / full-screen controls. Full screen on another
-  screen shape boxes the picture (black bars not processed).
+- Screenshots; window / full-screen controls (the menu switches at once).
+  Full screen covers the whole screen, black bars included, unless
+  `window.skip_black_bars` (off by default: a boxed window loses independent
+  flip where Windows gives it no overlay plane, see FRAMEGEN-LEARNINGS.md).
 - Our own update check with one-click self-update (GitHub releases).
 - Hidden "save bug report" (the F9 frame-gen captures + capture viewer).
 

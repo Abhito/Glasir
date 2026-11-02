@@ -44,6 +44,7 @@ struct Settings {
     bool audio_min_period = true;
     // [window]
     bool borderless = true;
+    bool skip_black_bars = false;  // full screen: mpv's window takes the picture only (backdrop.h)
     // [launcher]
     bool show_launcher = true;  // Glasir.exe opens its window first
     // [update]

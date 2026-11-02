@@ -18,11 +18,6 @@ latency and modern enhancements applied live:
   sharp and quick
 - One-click updates, and bug reports with one key (`F9`)
 
-> **Status: v1 is complete; no release has been published yet.** Everything
-> in [docs/PLAN.md](docs/PLAN.md) for v1 is built. It has been tested on one
-> PC so far (see [Tested with](#tested-with)); until the first release,
-> build it yourself ([Building](#building)).
-
 ## Requirements
 
 - Windows 11, 64-bit
@@ -37,7 +32,10 @@ latency and modern enhancements applied live:
 ### Tested with
 
 - Consoles: PS5 and Switch 2, in SDR and HDR
-- Capture card: AVerMedia Live Gamer Ultra 2.1
+- Capture cards:
+  - AVerMedia Live Gamer Ultra 2.1 (SDR and HDR)
+  - StreamLine Mini+ GC311G2 (1080p60, SDR only: it has no 10-bit mode, so
+    Glasir offers no HDR with it)
 - GPU: NVIDIA GeForce RTX 5070 Ti
 - Screen: 3440x1440 at 165 Hz, G-SYNC, HDR
 
@@ -97,12 +95,16 @@ The menu (`Tab`) is drawn after DLSS 5 and frame generation, on every frame
 that reaches the screen, so it stays sharp and answers at once. Keys and the
 mouse go to it while it is open.
 
-Full screen on a screen of another shape than the picture (a 16:9 console on
-an ultrawide) shows the picture as large as fits, black around it. DLSS 5 and
-frame generation work on the picture only, not on the black bars, which
-leaves the GPU more room (on 3440x1440, DLSS 5 takes about 40 % less time).
-The menu's "Full screen" and `f` switch to mpv's own full screen, over the
-whole screen.
+The menu switches between full screen and a window at once, and keeps the
+choice. Full screen covers the whole screen; on a screen of another shape
+than the picture (a 16:9 console on an ultrawide) the picture is as large as
+fits, with black bars beside it, and DLSS 5 works on the bars too (on
+3440x1440 about 9.7 ms a frame instead of 5.5 for the picture alone).
+"Skip the black bars" in Glasir's window (`[window] skip_black_bars = 1`)
+makes Glasir's window the picture's size, black around it, so DLSS 5 and
+frame generation skip the bars. It is off by default: on some PCs Windows
+then composes the window, and frame generation falls short of double (see
+[Troubleshooting](docs/TROUBLESHOOTING.md)).
 
 A capture smaller than its place on the screen (1080p on a 1440p screen) is
 scaled up before DLSS 5, as "Scaling" in Glasir's window or the menu says:

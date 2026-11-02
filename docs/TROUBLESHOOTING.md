@@ -31,15 +31,26 @@ tests.
   screen mode** (Glasir's full screen is a borderless window).
 - G-SYNC follows the focused window: clicking a window on another screen
   turns VRR off for Glasir until you click back into it.
-- Glasir's own full screen keeps VRR, also with black bars on an ultrawide.
+- Glasir's own full screen covers the whole screen, which keeps VRR. A
+  window smaller than the screen (a window, or full screen with "Skip the
+  black bars") keeps it only while Windows can give it a hardware overlay
+  plane (MPO), which other running apps can take away; it is then composed
+  by Windows, a frame later, and frame generation reaches only about 100 of
+  120 fps. If the menu shows less than double, turn "Skip the black bars"
+  off.
 
 ## Black bars on an ultrawide screen
 
 A 16:9 console on a 21:9 screen is shown as large as fits, with black bars
-at the sides. DLSS 5 and frame generation work on the picture only, which
-leaves the GPU more room. `f` (or "Full screen" in the menu) switches to
-mpv's own full screen over the whole screen; DLSS 5 and frame generation then
-also work on the bars.
+at the sides. DLSS 5 works on the whole screen, bars included (on 3440x1440
+about 9.7 ms a frame instead of 5.5 for the picture alone); at 60 fps with
+frame generation that can leave too little room, and frame generation then
+pauses on its own. Neither the DLSS 5 add-on nor its feeder can be limited
+to a part of the screen, but Glasir's window can: "Skip the black bars" in
+Glasir's window (`[window] skip_black_bars = 1`) makes it the picture's
+size, black around it (about 5.5 ms instead of 9.7). Check the fps in the
+menu (Tab) afterwards: where Windows composes such a window, frame
+generation falls short of double, and the option is better off.
 
 ## HDR
 

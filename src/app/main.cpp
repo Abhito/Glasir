@@ -385,6 +385,7 @@ struct Source {
     }
 
     bool raw = true;
+    bool hdr_available = false;  // the card has a 10-bit mode (P010) Glasir can read: the menu offers HDR
     // Media Foundation
     ComPtr<IMFMediaSource> source;
     ComPtr<IMFSourceReader> reader;
@@ -432,6 +433,7 @@ bool open_source(const Args &args, const Settings &s, Source &src) {
         src.layout.height = s.height;
         src.fps = s.fps;
         src.device_name = args.input_raw;
+        src.hdr_available = true;  // whatever the input is, --raw-format says
         return true;
     }
 
@@ -448,6 +450,11 @@ bool open_source(const Args &args, const Settings &s, Source &src) {
     ModeRequest any = request;
     any.supported_only = false;
     const CaptureDevice *device = nullptr;
+    auto hdr_modes = [](const CaptureDevice &d) {
+        for (const auto &m : d.modes)
+            if (m.supported && m.format == PixelFormat::P010) return true;
+        return false;
+    };
     if (s.path != Settings::CapturePath::DirectShow) {
         device = choose_device(devices, s.device, request);
         if (device) {
@@ -463,6 +470,7 @@ bool open_source(const Args &args, const Settings &s, Source &src) {
                 src.fps = mode->fps;
                 src.device_name = device->name;
                 src.symbolic_link = device->symbolic_link;
+                src.hdr_available = hdr_modes(*device);
                 return true;
             }
         }
@@ -848,23 +856,36 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     // The in-game menu keeps what it changes in the same file.
     SetEnvironmentVariableW(L"GLASIR_SETTINGS", settings_path.c_str());
     SetEnvironmentVariableW(L"GLASIR_VIDEO_MODE", s.hdr ? L"hdr" : L"sdr");
+    SetEnvironmentVariableW(L"GLASIR_HDR_AVAILABLE", src.hdr_available ? L"1" : L"0");
+    SetEnvironmentVariableW(L"GLASIR_WINDOW_MODE", s.borderless ? L"borderless" : L"windowed");
     MpvProcess mpv;
     if (!mpv.start(join_command_line(plan.mpv_exe, mpv_arguments(plan, s)), plan.raw, error)) {
         report(error);
         return 1;
     }
-    // Full screen on a screen of another shape than the picture: mpv's
-    // window takes the picture only, black around it (backdrop.h).
-    Backdrop backdrop;
-    if (s.borderless) {
-        const UINT32 width = plan.raw ? plan.layout.width : (plan.dshow_mode ? plan.dshow_mode->width : s.width);
-        const UINT32 height = plan.raw ? plan.layout.height : (plan.dshow_mode ? plan.dshow_mode->height : s.height);
-        if (width && height) backdrop.start(mpv.pid(), width, height);
+    // mpv's window: full screen or a window (the menu switches it), and
+    // full screen without the black bars (backdrop.h).
+    Backdrop backdrop;  // after changes stops: it calls this
+    {
+        WindowSetup w;
+        w.borderless = s.borderless;
+        w.skip_bars = s.skip_black_bars;
+        w.width = plan.raw ? plan.layout.width : (plan.dshow_mode ? plan.dshow_mode->width : s.width);
+        w.height = plan.raw ? plan.layout.height : (plan.dshow_mode ? plan.dshow_mode->height : s.height);
+        w.mpv_command = [&mpv, pipe = plan.ipc_pipe](const std::vector<std::wstring> &words) {
+            mpv.send(pipe, ipc_command(words), 1000);
+        };
+        backdrop.start(mpv.pid(), std::move(w));
     }
     int rc = 0;
     InGameReports reports(dir, settings_path, plan.ipc_pipe, mpv);  // after changes stops: it calls this
     MpvWatch changes;
-    changes.on_message = [&reports](const std::vector<std::string> &words) { reports.on_message(words); };
+    changes.on_message = [&reports, &backdrop](const std::vector<std::string> &words) {
+        if (words.front() == "glasir-window" && words.size() > 1)
+            backdrop.set_borderless(words[1] == "borderless");
+        else
+            reports.on_message(words);
+    };
     {
         QuitWatcher watcher(quit_event, mpv);
         const std::wstring target = mpv_load_target(plan);

@@ -95,6 +95,7 @@ struct Choice {
     bool audio = true;
     std::wstring audio_device;
     bool borderless = true;
+    bool skip_bars = false;
     bool show = true;
     Settings::Scaling scaling = Settings::Scaling::Mpv;
     UINT32 shown_height = 0;  // the mode the window shows (automatic resolved), for the scaling note
@@ -346,7 +347,9 @@ void scaling_row(Choice &c, const Found *f) {
         }
         ImGui::EndCombo();
     }
-    if (c.scaling == Settings::Scaling::Vsr && !rtx) c.scaling = Settings::Scaling::Fsr;  // not this GPU
+    // Not this GPU - once it is known: the first frames are drawn before the
+    // GPU is found, and would turn a saved VSR into FSR.
+    if (c.scaling == Settings::Scaling::Vsr && f && f->gpu.found && !rtx) c.scaling = Settings::Scaling::Fsr;
     // A capture as tall as its place on the screen is not scaled at all.
     const int screen_w = GetSystemMetrics(SM_CXSCREEN), screen_h = GetSystemMetrics(SM_CYSCREEN);
     const UINT32 place_h = UINT32(std::min(screen_h, screen_w * 9 / 16));
@@ -522,6 +525,14 @@ void draw(Screen &s) {
         if (ImGui::Selectable("A window", !c.borderless)) c.borderless = false;
         ImGui::EndCombo();
     }
+    if (c.borderless) {
+        ImGui::Checkbox("Skip the black bars", &c.skip_bars);
+        dim(c.skip_bars ? "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
+                          "generation work on the picture only. On some PCs Windows then composes the window and "
+                          "frame generation falls short of double: check the fps in the menu (Tab)."
+                        : "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
+                          "generation skip the bars, a lighter load.");
+    }
     ImGui::Checkbox("Show this window when Glasir starts", &c.show);
     if (!c.show) dim("Glasir then plays at once. Hold Shift while starting it to see this window.");
 
@@ -602,6 +613,7 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool rtx50
     if (c.audio != o.audio) v.push_back({L"audio", L"enabled", c.audio ? L"1" : L"0"});
     if (c.audio_device != o.audio_device) v.push_back({L"audio", L"device", c.audio_device});
     if (c.borderless != o.borderless) v.push_back({L"window", L"mode", c.borderless ? L"borderless" : L"windowed"});
+    if (c.skip_bars != o.skip_bars) v.push_back({L"window", L"skip_black_bars", c.skip_bars ? L"1" : L"0"});
     if (c.show != o.show) v.push_back({L"launcher", L"show", c.show ? L"1" : L"0"});
     if (c.scaling != o.scaling) v.push_back({L"video", L"scaling", scaling_name(c.scaling)});
     if (v.empty()) return;
@@ -640,6 +652,7 @@ Choice from(const Settings &s) {
     c.audio = s.audio;
     c.audio_device = s.audio_device;
     c.borderless = s.borderless;
+    c.skip_bars = s.skip_black_bars;
     c.show = s.show_launcher;
     c.scaling = s.scaling;
     return c;

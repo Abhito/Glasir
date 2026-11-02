@@ -44,8 +44,6 @@ captures (real game frames) are never committed.
 - Behaviour agreed with the owner for motion that cannot be found (a turning
   spiky hairdo): show it **solid with a lagging shape** (one real frame moved
   with the head), never see-through, never a blend.
-- Inspiration only: DLSS-5-MANAGER's "Live Flow" is all rights reserved;
-  ideas, no code.
 
 ## 2. How the method evolved
 
@@ -234,7 +232,7 @@ Dead ends in this phase:
 
 ## 4. Research rounds
 
-Five research reports were written first (Grok 4.7 high), then two rounds of
+Five research reports were written first, then two rounds of
 implementations in private copies, scored with the same tools.
 
 ### 4.1 Hardware and SDK motion, rejected
@@ -419,8 +417,15 @@ can be avoided.
   The screen is ~165 Hz.
 - **Window layouts (PresentMon, 11-01):**
   - borderless full screen, and a boxed top-level window (Glasir's full
-    screen on an ultrawide, `src/app/backdrop.cpp`), both keep independent
-    flip and VRR;
+    screen on an ultrawide, `src/app/backdrop.cpp`), both kept independent
+    flip and VRR - the boxed one only while Windows gave it an overlay
+    plane: after a reboot the same test (plain mpv, `--no-config`) was
+    "Composed: Flip" boxed, independent flip only at exactly the monitor's
+    size (3440x1439 was composed too). Composed, presents wait a frame in
+    DWM, the queue fills and frame generation gave ~40 of 60 generated
+    frames ("queue full") with the GPU 19 % busy. Cause not found (not the
+    second screen, taskbars, SDR/HDR, Wallpaper Engine); the boxed window
+    became an option, off by default (`window.skip_black_bars`, 11-01);
   - an mpv child window (`--wid`) loses VRR.
 - **NVIDIA "Prefer maximum performance" for mpv** made 60 fps work ~2 ms
   slower per frame. Leave power at the default.
@@ -456,6 +461,12 @@ can be avoided.
   (README), but the interpolation is not the big cost next to DLSS 5.
 - **Boxed full screen** (11-01) was the biggest single gain: DLSS 5 and frame
   generation stopped working on the ultrawide's black bars (9.7 → 5.5 ms).
+  An option, off by default, since the same day (`window.skip_black_bars`):
+  it depends on an overlay plane Windows does not always give (section
+  above), and without one frame generation loses about a sixth of its frames
+  even with DLSS 5 off. Neither the DLSS 5 add-on
+  (`NRResolutionScale` only scales the whole frame) nor the feeder
+  (`work_resolution`) can be limited to the picture.
 - GPU timings vary ~1 ms between sessions (clocks, background apps such as
   NVIDIA Broadcast or Wallpaper Engine). Compare A/B within one session.
 

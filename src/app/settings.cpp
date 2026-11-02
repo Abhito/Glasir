@@ -149,6 +149,9 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         if (l == L"borderless") s.borderless = true;
         else if (l == L"windowed") s.borderless = false;
         else return bad(L"borderless or windowed");
+    } else if (name == L"window.skip_black_bars") {
+        if (!parse_bool(value, b)) return bad(L"1 or 0");
+        s.skip_black_bars = b;
     } else if (name == L"launcher.show") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.show_launcher = b;
@@ -247,8 +250,15 @@ delay_ms = 0
 period = minimum
 
 [window]
-; borderless (fills the screen) or windowed.
+; borderless (fills the screen) or windowed. The menu (Tab) switches it and
+; keeps the choice here.
 mode = borderless
+; Full screen on a screen of another shape than the picture (16:9 on an
+; ultrawide). 0: mpv covers the screen, black bars included. 1: mpv's window
+; takes the picture only, black around it, so DLSS 5 and frame generation skip
+; the bars. Some PCs then compose the window (no overlay plane for it) and
+; frame generation falls short of double: check the menu's fps.
+skip_black_bars = 0
 
 [launcher]
 ; 1: Glasir.exe opens its window first (card, picture, enhancements, sound).

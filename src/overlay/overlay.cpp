@@ -47,6 +47,8 @@ struct Overlay {
     UINT style_height = 0;
     std::wstring settings_path;
     bool source_hdr = false;
+    bool hdr_available = true;
+    bool borderless = true;
     // Frames the menu was drawn on since it opened: mpv's presents, and the
     // real frames frame generation presents itself.
     unsigned on_mpv = 0, on_real = 0;
@@ -113,6 +115,13 @@ bool init(ID3D11Device *device) {
     if (GetEnvironmentVariableW(L"GLASIR_SETTINGS", path, MAX_PATH) > 0) g.settings_path = path;
     wchar_t mode[8] = {};
     g.source_hdr = GetEnvironmentVariableW(L"GLASIR_VIDEO_MODE", mode, 8) > 0 && _wcsicmp(mode, L"hdr") == 0;
+    // Unset (mpv started some other way): offered, as before.
+    wchar_t hdr_available[4] = {};
+    g.hdr_available = GetEnvironmentVariableW(L"GLASIR_HDR_AVAILABLE", hdr_available, 4) == 0 ||
+                      wcscmp(hdr_available, L"0") != 0;
+    wchar_t window_mode[16] = {};
+    g.borderless = GetEnvironmentVariableW(L"GLASIR_WINDOW_MODE", window_mode, 16) == 0 ||
+                   _wcsicmp(window_mode, L"windowed") != 0;
     reshade::log::message(reshade::log::level::info, "Glasir menu: ready");
     return true;
 }
@@ -199,6 +208,8 @@ void build_and_draw(ID3D11DeviceContext *context, ID3D11Texture2D *back_buffer, 
         frame.encoding = g.encoding;
         frame.settings_path = g.settings_path;
         frame.source_hdr = g.source_hdr;
+        frame.hdr_available = g.hdr_available;
+        frame.borderless = g.borderless;
         frame.scale = scale;
         keep = draw_menu(frame);
     }

@@ -19,6 +19,8 @@ struct MenuFrame {
     Encoding encoding = Encoding::Sdr;
     std::wstring settings_path;  // glasir.ini, where the menu keeps what it changes ("" = nowhere)
     bool source_hdr = false;     // the capture is HDR (glasir.ini video.mode), whatever mpv outputs
+    bool hdr_available = true;   // the card has an HDR mode (false: no "Switch to HDR")
+    bool borderless = true;      // glasir.ini window.mode when mpv started (the menu follows its own switches)
     float scale = 1;             // 1 at 1080 lines
 };
 

@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "backdrop.h"
 #include "bug_report.h"
+#include "backdrop.h"
 #include "components.h"
 #include "devices.h"
 #include "glasir_version.h"
@@ -144,9 +144,13 @@ int main() {
         Settings fresh;
         expect(load_settings(path, fresh, error), "missing settings file: defaults");
         Settings reread;
-        reread.hdr = true;  // must be reset by the file's mode = sdr
-        expect(load_settings(path, reread, error) && !reread.hdr && reread.dedup && reread.borderless,
+        reread.hdr = true;              // must be reset by the file's mode = sdr
+        reread.skip_black_bars = true;  // and by skip_black_bars = 0
+        expect(load_settings(path, reread, error) && !reread.hdr && reread.dedup && reread.borderless &&
+                   !reread.skip_black_bars,
                "the written defaults read back");
+        expect(apply_override(reread, L"window.skip_black_bars=1", error) && reread.skip_black_bars,
+               "--set window.skip_black_bars=1");
         HANDLE f = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
         const char text[] = "\xEF\xBB\xBF[capture]\r\ndevice = Live Gamer ; my card\r\nfps=60\r\n[video]\r\nmode = HDR\r\n";
         DWORD written = 0;
@@ -362,23 +366,6 @@ int main() {
         expect(!watch.changed("user-data/glasir/audio-delay"), "watch: changed and back is no change");
     }
     {
-        // Full screen: where the picture goes on the monitor (backdrop.h).
-        auto same = [](const RECT &r, LONG l, LONG t, LONG rr, LONG b) {
-            return r.left == l && r.top == t && r.right == rr && r.bottom == b;
-        };
-        expect(same(fit_picture(RECT{0, 0, 3440, 1440}, 1920, 1080), 440, 0, 3000, 1440),
-               "16:9 on 3440x1440: 2560x1440 in the middle");
-        expect(same(fit_picture(RECT{0, 0, 1920, 1200}, 3840, 2160), 0, 60, 1920, 1140),
-               "16:9 on 16:10: bars above and below");
-        expect(same(fit_picture(RECT{0, 0, 2560, 1440}, 1920, 1080), 0, 0, 2560, 1440),
-               "16:9 on 16:9: the whole screen");
-        expect(same(fit_picture(RECT{-2560, 100, 0, 1540}, 1280, 720), -2560, 100, 0, 1540),
-               "16:9 on a 16:9 screen left of the main one: the whole screen");
-        expect(same(fit_picture(RECT{0, 0, 1366, 768}, 1920, 1080), 0, 0, 1366, 768),
-               "1366x768 is 16:9 but for rounding: the whole screen");
-        expect(same(fit_picture(RECT{0, 0, 3440, 1440}, 0, 0), 0, 0, 3440, 1440), "no picture size: the whole screen");
-    }
-    {
         // Updates (update.h): versions and GitHub's release answer.
         int v[3] = {};
         expect(parse_version(L"v0.2.10", v) && v[0] == 0 && v[1] == 2 && v[2] == 10, "version v0.2.10");
@@ -443,6 +430,28 @@ int main() {
                    has(L"--script-opts-append=glasir_scaling-hdr=yes") &&
                    has(L"--script-opts-append=glasir_scaling-hdr_peak=800"),
                "mpv gets the scaling mode and the HDR tags for VSR");
+    }
+    {
+        // Full screen without the bars: where the picture goes (backdrop.h).
+        auto same = [](const RECT &r, LONG l, LONG t, LONG rr, LONG b) {
+            return r.left == l && r.top == t && r.right == rr && r.bottom == b;
+        };
+        expect(same(fit_picture(RECT{0, 0, 3440, 1440}, 1920, 1080), 440, 0, 3000, 1440),
+               "16:9 on 3440x1440: 2560x1440 in the middle");
+        expect(same(fit_picture(RECT{0, 0, 1920, 1200}, 3840, 2160), 0, 60, 1920, 1140),
+               "16:9 on 16:10: bars above and below");
+        expect(same(fit_picture(RECT{0, 0, 2560, 1440}, 1920, 1080), 0, 0, 2560, 1440),
+               "16:9 on 16:9: the whole screen");
+        expect(same(fit_picture(RECT{-2560, 100, 0, 1540}, 1280, 720), -2560, 100, 0, 1540),
+               "16:9 on a 16:9 screen left of the main one: the whole screen");
+        expect(same(fit_picture(RECT{0, 0, 1366, 768}, 1920, 1080), 0, 0, 1366, 768),
+               "1366x768 is 16:9 but for rounding: the whole screen");
+        expect(same(fit_picture(RECT{0, 0, 3440, 1440}, 0, 0), 0, 0, 3440, 1440), "no picture size: the whole screen");
+        // A window from the menu: centred in the work area, smaller if it must be.
+        expect(same(centre_window(RECT{0, 0, 3440, 1392}, 1280, 720), 1080, 336, 2360, 1056),
+               "1280x720 window centred above the taskbar");
+        expect(same(centre_window(RECT{616, -1317, 2536, -237}, 1920, 1080), 712, -1263, 2440, -291),
+               "a window as large as the screen: 90 % of it, centred");
     }
     std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
     return g_failures ? 1 : 0;
