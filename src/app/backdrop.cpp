@@ -21,6 +21,7 @@ constexpr UINT_PTR kSyncTimer = 2;
 constexpr UINT_PTR kSettleTimer = 3;
 constexpr DWORD kCursorIdleMs = 1000;  // as mpv hides its own after a moment
 constexpr UINT kSetMode = WM_APP + 1;  // thread message: wparam 1 = full screen, 0 = a window
+constexpr UINT kPlaceAgain = WM_APP + 2;  // thread message: mpv left its own full screen
 // After a switch, mpv's window is put in place again for this long if mpv
 // (which changes its border on its own thread) moves it back meanwhile.
 constexpr ULONGLONG kSettleMs = 1500;
@@ -275,6 +276,10 @@ void Backdrop::set_borderless(bool borderless) {
     if (const DWORD id = thread_id_.load()) PostThreadMessageW(id, kSetMode, borderless ? 1 : 0, 0);
 }
 
+void Backdrop::place_again() {
+    if (const DWORD id = thread_id_.load()) PostThreadMessageW(id, kPlaceAgain, 0, 0);
+}
+
 void Backdrop::stop() {
     if (!thread_.joinable()) return;
     stopping_ = true;
@@ -318,7 +323,7 @@ void Backdrop::run() {
     if (FAILED(CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&state.taskbar))) ||
         FAILED(state.taskbar->HrInit()))
         state.taskbar.Reset();
-    if (boxed(state)) {
+    if (boxed(state) && !setup_.fullscreen) {
         // mpv may still size its window itself (--geometry) just after it
         // shows it: put it back meanwhile.
         const RECT picture = full_screen_rect(state);
@@ -346,6 +351,14 @@ void Backdrop::run() {
     while (!stopping_ && GetMessageW(&msg, nullptr, 0, 0) > 0) {
         if (!msg.hwnd && msg.message == kSetMode) {
             if (IsWindow(mpv)) switch_mode(state, msg.wParam != 0);
+            continue;
+        }
+        if (!msg.hwnd && msg.message == kPlaceAgain) {
+            if (IsWindow(mpv) && state.setup.borderless) {
+                settle_for(state, full_screen_rect(state), kSettleMs);
+                mark_full_screen(state, boxed(state));
+                sync(state);
+            }
             continue;
         }
         TranslateMessage(&msg);

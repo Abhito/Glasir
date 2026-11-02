@@ -820,9 +820,10 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
         return 1;
     }
     CreateDirectoryW(plan.screenshot_dir.c_str(), nullptr);
+    const GpuInfo gpu = display_gpu();
+    plan.vsr = vsr_kind(gpu);
     if (reshade_installed(engine)) {
         // DLSS 5: auto runs it on an RTX 50 GPU; on tries any GPU.
-        const GpuInfo gpu = display_gpu();
         const bool installed = dlss5_installed(engine);
         const bool loaded = installed && (s.dlss5 == Settings::Dlss5::On || is_rtx50(gpu));
         const bool dlss5 = loaded && s.dlss5 != Settings::Dlss5::Off;
@@ -857,7 +858,8 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     SetEnvironmentVariableW(L"GLASIR_SETTINGS", settings_path.c_str());
     SetEnvironmentVariableW(L"GLASIR_VIDEO_MODE", s.hdr ? L"hdr" : L"sdr");
     SetEnvironmentVariableW(L"GLASIR_HDR_AVAILABLE", src.hdr_available ? L"1" : L"0");
-    SetEnvironmentVariableW(L"GLASIR_WINDOW_MODE", s.borderless ? L"borderless" : L"windowed");
+    SetEnvironmentVariableW(L"GLASIR_WINDOW_MODE",
+                            s.fullscreen ? L"fullscreen" : s.borderless ? L"borderless" : L"windowed");
     MpvProcess mpv;
     if (!mpv.start(join_command_line(plan.mpv_exe, mpv_arguments(plan, s)), plan.raw, error)) {
         report(error);
@@ -869,6 +871,7 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     {
         WindowSetup w;
         w.borderless = s.borderless;
+        w.fullscreen = s.fullscreen;
         w.skip_bars = s.skip_black_bars;
         w.width = plan.raw ? plan.layout.width : (plan.dshow_mode ? plan.dshow_mode->width : s.width);
         w.height = plan.raw ? plan.layout.height : (plan.dshow_mode ? plan.dshow_mode->height : s.height);
@@ -881,7 +884,9 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     InGameReports reports(dir, settings_path, plan.ipc_pipe, mpv);  // after changes stops: it calls this
     MpvWatch changes;
     changes.on_message = [&reports, &backdrop](const std::vector<std::string> &words) {
-        if (words.front() == "glasir-window" && words.size() > 1)
+        if (words.front() == "glasir-window" && words.size() > 1 && words[1] == "again")
+            backdrop.place_again();  // mpv left its own full screen (glasir_window.lua)
+        else if (words.front() == "glasir-window" && words.size() > 1)
             backdrop.set_borderless(words[1] == "borderless");
         else
             reports.on_message(words);

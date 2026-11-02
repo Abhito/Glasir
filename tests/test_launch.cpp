@@ -13,6 +13,7 @@
 #include "components.h"
 #include "devices.h"
 #include "glasir_version.h"
+#include "gpu.h"
 #include "json.h"
 #include "log.h"
 #include "mpv_launch.h"
@@ -415,7 +416,30 @@ int main() {
         expect(s.scaling == Settings::Scaling::Mpv && apply_override(s, L"video.scaling=VSR", error) &&
                    s.scaling == Settings::Scaling::Vsr && !apply_override(s, L"video.scaling=dlss", error),
                "video.scaling: mpv by default, vsr, not anything else");
+        expect(apply_override(s, L"video.scaling=cnn", error) && s.scaling == Settings::Scaling::Cnn &&
+                   std::wstring(scaling_name(s.scaling)) == L"cnn" &&
+                   apply_override(s, L"video.scaling=Anime4K", error) && s.scaling == Settings::Scaling::Anime4k &&
+                   std::wstring(scaling_name(s.scaling)) == L"anime4k" && apply_override(s, L"video.scaling=vsr", error),
+               "video.scaling: cnn and anime4k, named back the same");
+        expect(apply_override(s, L"window.mode=fullscreen", error) && s.fullscreen && s.borderless &&
+                   apply_override(s, L"window.mode=borderless", error) && !s.fullscreen && s.borderless &&
+                   apply_override(s, L"window.mode=windowed", error) && !s.fullscreen && !s.borderless &&
+                   !apply_override(s, L"window.mode=exclusive", error),
+               "window.mode: fullscreen, borderless, windowed");
+        {
+            Settings w;
+            w.fullscreen = true;
+            const auto wargs = mpv_arguments(MpvPlan{}, w);
+            const auto has_arg = [&](const wchar_t *arg) {
+                for (const auto &x : wargs)
+                    if (x == arg) return true;
+                return false;
+            };
+            expect(has_arg(L"--fullscreen") && has_arg(L"--no-border"),
+                   "window.mode = fullscreen: mpv starts in its full screen, borderless when it leaves it");
+        }
         MpvPlan plan;
+        plan.vsr = L"intel";
         plan.layout.width = 1920;
         plan.layout.height = 1080;
         s.hdr = true;
@@ -428,8 +452,17 @@ int main() {
         };
         expect(has(L"--script-opts-append=glasir_scaling-mode=vsr") &&
                    has(L"--script-opts-append=glasir_scaling-hdr=yes") &&
-                   has(L"--script-opts-append=glasir_scaling-hdr_peak=800"),
-               "mpv gets the scaling mode and the HDR tags for VSR");
+                   has(L"--script-opts-append=glasir_scaling-hdr_peak=800") &&
+                   has(L"--script-opts-append=glasir_scaling-vsr=intel"),
+               "mpv gets the scaling mode, the GPU's VSR and the HDR tags for VSR");
+        GpuInfo gpu{L"NVIDIA GeForce RTX 5070 Ti", kVendorNvidia, true};
+        expect(std::wstring(vsr_kind(gpu)) == L"nvidia", "VSR: NVIDIA RTX");
+        gpu = {L"NVIDIA GeForce GTX 1660", kVendorNvidia, true};
+        expect(std::wstring(vsr_kind(gpu)) == L"none", "VSR: not on a GTX");
+        gpu = {L"Intel(R) Arc(TM) A770 Graphics", kVendorIntel, true};
+        expect(std::wstring(vsr_kind(gpu)) == L"intel", "VSR: Intel");
+        gpu = {L"AMD Radeon RX 7900 XTX", 0x1002, true};
+        expect(std::wstring(vsr_kind(gpu)) == L"none", "VSR: none on AMD");
     }
     {
         // Full screen without the bars: where the picture goes (backdrop.h).

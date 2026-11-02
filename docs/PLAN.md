@@ -45,9 +45,14 @@ Keep / build:
 - Upscaling: mpv's built-in scaling + FSR1 (any GPU); RTX VSR on NVIDIA.
   DLSS / FSR upscaling later, enabled by compatibility. *(done: [video]
   scaling = mpv | fsr | vsr, glasir_scaling.lua + Glasir's own FSR 1 port;
-  launcher and menu)*
-- Screenshots; window / full-screen controls (the menu switches at once).
-  Full screen covers the whole screen, black bars included, unless
+  launcher and menu)* *(done: Intel VSR (d3d11vpp scaling-mode=intel), and
+  cnn (ArtCNN C4F16 + FSR 1) and anime4k (Anime4K v4 mode A), vendored MIT
+  shaders. Temporal upscalers (DLSS SR, FSR 2/3, XeSS) are left out: a
+  capture has no camera jitter, depth or engine motion vectors, so they
+  would add ghosting and no detail)*
+- Screenshots; window / full-screen controls (the menu switches at once:
+  full screen (mpv's own, f / double-click), borderless, window).
+  Borderless covers the whole screen, black bars included, unless
   `window.skip_black_bars` (off by default: a boxed window loses independent
   flip where Windows gives it no overlay plane, see FRAMEGEN-LEARNINGS.md).
 - Our own update check with one-click self-update (GitHub releases).

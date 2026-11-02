@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 
 #include <imgui.h>
@@ -74,6 +75,29 @@ void warn(const char *text) {
 // A labelled slider across the panel; true when moved.
 // Left and Right move it by step while it is highlighted (no need to press
 // Enter on it first, as Dear ImGui would want).
+// A label and one radio button per choice, on as many lines as the menu's
+// width needs (a second line lines up under the first button). The choice
+// clicked, if it is not the current one; else -1.
+int radio_row(const char *label, std::initializer_list<const char *> choices, int current) {
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    const ImGuiStyle &style = ImGui::GetStyle();
+    float left = 0;
+    int clicked = -1, i = 0;
+    for (const char *choice : choices) {
+        const float w = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize(choice).x;
+        if (left == 0 || ImGui::GetItemRectMax().x + style.ItemSpacing.x + w <= right)
+            ImGui::SameLine();
+        else
+            ImGui::SetCursorPosX(left);
+        if (left == 0) left = ImGui::GetCursorPosX();
+        if (ImGui::RadioButton(choice, i == current) && i != current) clicked = i;
+        ++i;
+    }
+    return clicked;
+}
+
 bool slider(const char *label, const char *id, int *value, int lo, int hi, const char *format, int step) {
     ImGui::TextUnformatted(label);
     ImGui::SetNextItemWidth(-1);
@@ -182,19 +206,16 @@ void picture(const MenuFrame &f, const MpvState &mpv) {
 
     // Scaling up (glasir_scaling.lua in mpv): switched at once.
     if (!mpv.scaling.empty()) {
-        static const struct {
-            const char *mode, *label;
-        } kModes[] = {{"mpv", "mpv"}, {"fsr", "FSR 1"}, {"vsr", "RTX VSR"}};
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Scaling");
-        for (const auto &m : kModes) {
-            ImGui::SameLine();
-            if (ImGui::RadioButton(m.label, mpv.scaling == m.mode) && mpv.scaling != m.mode) {
-                f.mpv->command({"script-message", "glasir-scaling", m.mode});
-                save(f, "video", "scaling", m.mode);
-            }
+        static const char *const kModes[] = {"mpv", "fsr", "vsr", "cnn", "anime4k"};
+        int current = -1;
+        for (int i = 0; i < 5; ++i)
+            if (mpv.scaling == kModes[i]) current = i;
+        const int m = radio_row("Scaling", {"mpv", "FSR 1", "VSR", "ArtCNN", "Anime4K"}, current);
+        if (m >= 0) {
+            f.mpv->command({"script-message", "glasir-scaling", kModes[m]});
+            save(f, "video", "scaling", kModes[m]);
         }
-        note("For a capture smaller than the screen. RTX VSR needs an NVIDIA RTX GPU.");
+        note("For a capture smaller than the screen. VSR: NVIDIA RTX or Intel GPUs. ArtCNN, Anime4K: more GPU time.");
     }
 }
 
@@ -233,17 +254,18 @@ void display(const MenuFrame &f, const MpvState &mpv) {
     section("DISPLAY");
     // Glasir moves mpv's window (and the black around a picture of another
     // shape than the screen); mpv changes its border.
+    // Full screen is mpv's own (f and a double-click switch it too); leaving
+    // it goes back to the borderless window or the window it came from.
     const bool borderless = g_menu.borderless < 0 ? f.borderless : g_menu.borderless == 1;
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Show as");
-    for (const bool choice : {true, false}) {
-        ImGui::SameLine();
-        if (ImGui::RadioButton(choice ? "Full screen" : "Window", borderless == choice) &&
-            (borderless != choice || mpv.fullscreen)) {
-            g_menu.borderless = choice ? 1 : 0;
-            f.mpv->command({"script-message", "glasir-window", choice ? "borderless" : "windowed"});
-            save(f, "window", "mode", choice ? "borderless" : "windowed");
-        }
+    const int current = mpv.fullscreen ? 0 : borderless ? 1 : 2;
+    const int choice = radio_row("Show as", {"Full screen", "Borderless", "Window"}, current);
+    if (choice == 0) {
+        f.mpv->command({"set", "fullscreen", "yes"});
+        save(f, "window", "mode", "fullscreen");
+    } else if (choice > 0) {
+        g_menu.borderless = choice == 1 ? 1 : 0;
+        f.mpv->command({"script-message", "glasir-window", choice == 1 ? "borderless" : "windowed"});
+        save(f, "window", "mode", choice == 1 ? "borderless" : "windowed");
     }
     const bool hdr = f.source_hdr;
     if (!hdr && !f.hdr_available) return;  // a card without HDR modes: nothing to switch to

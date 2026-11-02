@@ -36,6 +36,9 @@ struct MpvPlan {
     std::wstring audio_device;
     std::wstring audio_log;
     bool audio_missing = false;
+
+    // The GPU's video super resolution for scaling = vsr: vsr_kind().
+    std::wstring vsr = L"none";
 };
 
 // mpv's arguments (without the program).

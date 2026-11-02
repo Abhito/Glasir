@@ -33,6 +33,7 @@ RECT centre_window(const RECT &work, LONG width, LONG height);
 
 struct WindowSetup {
     bool borderless = true;   // glasir.ini window.mode
+    bool fullscreen = false;  // window.mode = fullscreen: mpv starts in its own full screen
     bool skip_bars = false;   // glasir.ini window.skip_black_bars (full screen only)
     UINT32 width = 0, height = 0;  // the picture; 0: unknown (full screen covers the screen)
     // Runs an mpv command over IPC (from the backdrop's own thread).
@@ -53,6 +54,9 @@ public:
     void start(DWORD mpv_pid, WindowSetup setup);
     // Full screen or a window, at once (any thread).
     void set_borderless(bool borderless);
+    // mpv left its own full screen: the borderless window goes back in place
+    // (a window stays where mpv puts it back). Any thread.
+    void place_again();
     void stop();
 
 private:

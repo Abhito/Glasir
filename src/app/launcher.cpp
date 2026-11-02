@@ -95,6 +95,7 @@ struct Choice {
     bool audio = true;
     std::wstring audio_device;
     bool borderless = true;
+    bool fullscreen = false;  // mpv's own full screen (borderless is then true)
     bool skip_bars = false;
     bool show = true;
     Settings::Scaling scaling = Settings::Scaling::Mpv;
@@ -324,15 +325,18 @@ struct BugReport {
 
 // How a capture smaller than the screen is scaled up.
 void scaling_row(Choice &c, const Found *f) {
-    const bool rtx = f && f->gpu.vendor == kVendorNvidia && f->gpu.name.find(L"RTX") != std::wstring::npos;
+    const std::wstring vsr = f ? vsr_kind(f->gpu) : L"none";
+    const char *vsr_label = vsr == L"intel" ? "Intel Video Super Resolution" : "NVIDIA RTX Video Super Resolution";
     struct Option {
         Settings::Scaling value;
         const char *label;
     };
-    static const Option options[] = {
+    const Option options[] = {
         {Settings::Scaling::Mpv, "mpv (Lanczos)"},
         {Settings::Scaling::Fsr, "AMD FSR 1 (sharper)"},
-        {Settings::Scaling::Vsr, "NVIDIA RTX Video Super Resolution"},
+        {Settings::Scaling::Vsr, vsr_label},
+        {Settings::Scaling::Cnn, "ArtCNN (neural, the most detail)"},
+        {Settings::Scaling::Anime4k, "Anime4K (cel-shaded and drawn styles)"},
     };
     row("Scaling");
     const char *current = options[0].label;
@@ -340,7 +344,7 @@ void scaling_row(Choice &c, const Found *f) {
         if (o.value == c.scaling) current = o.label;
     if (ImGui::BeginCombo("##scaling", current)) {
         for (const Option &o : options) {
-            const bool off = o.value == Settings::Scaling::Vsr && !rtx;
+            const bool off = o.value == Settings::Scaling::Vsr && vsr == L"none";
             if (off) ImGui::BeginDisabled();
             if (ImGui::Selectable(o.label, o.value == c.scaling)) c.scaling = o.value;
             if (off) ImGui::EndDisabled();
@@ -349,7 +353,7 @@ void scaling_row(Choice &c, const Found *f) {
     }
     // Not this GPU - once it is known: the first frames are drawn before the
     // GPU is found, and would turn a saved VSR into FSR.
-    if (c.scaling == Settings::Scaling::Vsr && f && f->gpu.found && !rtx) c.scaling = Settings::Scaling::Fsr;
+    if (c.scaling == Settings::Scaling::Vsr && f && f->gpu.found && vsr == L"none") c.scaling = Settings::Scaling::Fsr;
     // A capture as tall as its place on the screen is not scaled at all.
     const int screen_w = GetSystemMetrics(SM_CXSCREEN), screen_h = GetSystemMetrics(SM_CYSCREEN);
     const UINT32 place_h = UINT32(std::min(screen_h, screen_w * 9 / 16));
@@ -357,6 +361,8 @@ void scaling_row(Choice &c, const Found *f) {
         dim("Not used: the capture is as large as its place on the screen.");
     else if (c.scaling == Settings::Scaling::Vsr)
         dim("Uses the GPU's video engine; FSR 1 if it cannot run.");
+    else if (c.scaling == Settings::Scaling::Cnn || c.scaling == Settings::Scaling::Anime4k)
+        dim("Takes more GPU time, which DLSS 5 and frame generation also need.");
 }
 
 struct Screen {
@@ -520,12 +526,16 @@ void draw(Screen &s) {
 
     heading("WINDOW");
     row("Show as");
-    if (ImGui::BeginCombo("##window", c.borderless ? "Full screen (borderless)" : "A window")) {
-        if (ImGui::Selectable("Full screen (borderless)", c.borderless)) c.borderless = true;
-        if (ImGui::Selectable("A window", !c.borderless)) c.borderless = false;
+    const char *shown = c.fullscreen ? "Full screen" : c.borderless ? "Borderless (fills the screen)" : "A window";
+    if (ImGui::BeginCombo("##window", shown)) {
+        if (ImGui::Selectable("Full screen", c.fullscreen)) c.borderless = c.fullscreen = true;
+        if (ImGui::Selectable("Borderless (fills the screen)", c.borderless && !c.fullscreen))
+            c.borderless = true, c.fullscreen = false;
+        if (ImGui::Selectable("A window", !c.borderless)) c.borderless = c.fullscreen = false;
         ImGui::EndCombo();
     }
-    if (c.borderless) {
+    if (c.fullscreen) dim("mpv's own full screen, as f or a double-click switches it.");
+    if (c.borderless && !c.fullscreen) {
         ImGui::Checkbox("Skip the black bars", &c.skip_bars);
         dim(c.skip_bars ? "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
                           "generation work on the picture only. On some PCs Windows then composes the window and "
@@ -612,7 +622,8 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool rtx50
     if (c.fast != o.fast) v.push_back({L"framegen", L"quality", c.fast ? L"fast" : L"high"});
     if (c.audio != o.audio) v.push_back({L"audio", L"enabled", c.audio ? L"1" : L"0"});
     if (c.audio_device != o.audio_device) v.push_back({L"audio", L"device", c.audio_device});
-    if (c.borderless != o.borderless) v.push_back({L"window", L"mode", c.borderless ? L"borderless" : L"windowed"});
+    if (c.borderless != o.borderless || c.fullscreen != o.fullscreen)
+        v.push_back({L"window", L"mode", c.fullscreen ? L"fullscreen" : c.borderless ? L"borderless" : L"windowed"});
     if (c.skip_bars != o.skip_bars) v.push_back({L"window", L"skip_black_bars", c.skip_bars ? L"1" : L"0"});
     if (c.show != o.show) v.push_back({L"launcher", L"show", c.show ? L"1" : L"0"});
     if (c.scaling != o.scaling) v.push_back({L"video", L"scaling", scaling_name(c.scaling)});
@@ -652,6 +663,7 @@ Choice from(const Settings &s) {
     c.audio = s.audio;
     c.audio_device = s.audio_device;
     c.borderless = s.borderless;
+    c.fullscreen = s.fullscreen;
     c.skip_bars = s.skip_black_bars;
     c.show = s.show_launcher;
     c.scaling = s.scaling;

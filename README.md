@@ -8,8 +8,8 @@ latency and modern enhancements applied live:
 - **VRR / G-SYNC / FreeSync** pacing, with repeated frames from the card
   dropped (dedup), so a 30 fps game is shown at an even 30 fps
 - **DLSS 5 neural rendering** (NVIDIA RTX 50 series)
-- **Upscaling**: AMD FSR 1 on any GPU, NVIDIA RTX Video Super Resolution on
-  RTX GPUs, or mpv's own
+- **Upscaling**: AMD FSR 1, ArtCNN and Anime4K on any GPU, video super
+  resolution on NVIDIA RTX and Intel GPUs, or mpv's own
 - **HDR and SDR** from the same app, switched in the menu
 - **Low-latency WASAPI audio** from the card, with boost and a delay for lip
   sync
@@ -24,8 +24,8 @@ latency and modern enhancements applied live:
 - A capture card. Cards Windows' Media Foundation can open get everything;
   other cards are opened through DirectShow, without dedup and frame
   generation (Glasir says so). No guarantees for any card.
-- Any DirectX 11 GPU for frame generation and upscaling; an NVIDIA RTX GPU
-  for RTX Video Super Resolution; an NVIDIA RTX 50 series GPU for DLSS 5
+- Any DirectX 11 GPU for frame generation and upscaling; an NVIDIA RTX or
+  Intel GPU for video super resolution; an NVIDIA RTX 50 series GPU for DLSS 5
 - A VRR screen (G-SYNC or FreeSync) is best for frame pacing, but not
   needed
 
@@ -95,22 +95,34 @@ The menu (`Tab`) is drawn after DLSS 5 and frame generation, on every frame
 that reaches the screen, so it stays sharp and answers at once. Keys and the
 mouse go to it while it is open.
 
-The menu switches between full screen and a window at once, and keeps the
-choice. Full screen covers the whole screen; on a screen of another shape
+The menu's "Show as" switches at once, and keeps the choice: **Full screen**
+(mpv's own, what `f` or a double-click switches), **Borderless** (a window
+without a frame that fills the screen; leaving full screen goes back to it)
+or **Window**. Neither full screen is exclusive: both are windows that cover
+the screen, which Windows flips straight to the display (Independent Flip),
+as fast as exclusive full screen. Both cover the whole screen; on a screen of another shape
 than the picture (a 16:9 console on an ultrawide) the picture is as large as
 fits, with black bars beside it, and DLSS 5 works on the bars too (on
 3440x1440 about 9.7 ms a frame instead of 5.5 for the picture alone).
 "Skip the black bars" in Glasir's window (`[window] skip_black_bars = 1`)
-makes Glasir's window the picture's size, black around it, so DLSS 5 and
+makes the borderless window the picture's size, black around it, so DLSS 5 and
 frame generation skip the bars. It is off by default: on some PCs Windows
 then composes the window, and frame generation falls short of double (see
 [Troubleshooting](docs/TROUBLESHOOTING.md)).
 
 A capture smaller than its place on the screen (1080p on a 1440p screen) is
 scaled up before DLSS 5, as "Scaling" in Glasir's window or the menu says:
-mpv's own (Lanczos), **AMD FSR 1** (sharper edges, any GPU) or **NVIDIA RTX
-Video Super Resolution** (the GPU's video engine, RTX GPUs; FSR 1 where it
-cannot run). The menu switches it at once. A capture mode of the screen's
+
+- mpv's own (Lanczos)
+- **AMD FSR 1**: sharper edges, any GPU
+- **Video super resolution** (VSR): the GPU's video engine, on NVIDIA RTX
+  and Intel GPUs; FSR 1 where it cannot run
+- **ArtCNN**: a small neural network that rebuilds fine detail, any GPU; the
+  sharpest, for some more GPU time
+- **Anime4K**: neural upscaling made for drawn and cel-shaded styles (it can
+  look painted on realistic games), any GPU; the most GPU time
+
+The menu switches it at once. A capture mode of the screen's
 height (2560x1440 on a 1440p screen) needs no scaling at all.
 
 What the keys change (volume, mute, boost, delay, frame generation,
@@ -120,7 +132,7 @@ DLSS 5 and frame generation, so it is sharp and does not lag.
 | Key | |
 |---|---|
 | `Tab` | the menu: DLSS 5, frame generation, scaling, sound, full screen, SDR/HDR (`Esc` or `Tab` closes it) |
-| double-click, `f` | full screen |
+| double-click, `f` | full screen on / off (back to the borderless window or the window) |
 | `Up` / `Down`, mouse wheel | volume |
 | `m` | mute |
 | `Ctrl+Up` / `Ctrl+Down` | audio boost (up to 400 %) |

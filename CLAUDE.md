@@ -14,7 +14,9 @@
   with real hardware.
 - End-to-end without a card: `python tools/smoke_raw.py [--format p010 --hdr]`
   (ffmpeg test pattern -> `Glasir.exe --input-raw -` -> mpv, checked over
-  IPC). With the card, in a small window: `python tools/probe.py [--set ...]`;
+  IPC). Scaling modes: `python tools/scaling_check.py [--format p010 --hdr]
+  [--window 2560x1440 --size 1920x1080]` (switches each mode, checks the
+  shaders / VSR filter, prints mpv's GPU time per pass). With the card, in a small window: `python tools/probe.py [--set ...]`;
   `--grab N` saves N decoded frames (HDR tone-mapped) to `%TEMP%\glasir_grabs\`
   so you can look at them (downscale before viewing: 2560x1440 PNGs).
   Both open a window for a few seconds. Glasir allows one instance; its IPC
@@ -47,7 +49,12 @@
   not found), it was composed and frame gen fell to ~100 of 120 fps, so it
   is off by default. The menu's "Show as" posts `script-message
   glasir-window borderless|windowed`; Glasir sets mpv's `border` over IPC and
-  places the window (test it over IPC the same way). Check presentation
+  places the window (test it over IPC the same way). Its third choice, "Full
+  screen", is mpv's own `fullscreen` (`f`, double-click; `window.mode =
+  fullscreen`); leaving it, `glasir_window.lua` posts `glasir-window again`
+  and Glasir puts the borderless window back (the picture's size with
+  skip_black_bars). Neither is exclusive full screen (`d3d11-exclusive-fs`
+  is off). Check presentation
   changes with PresentMon (`MPV-SW-Capture\tools\presentmon`).
 - Updates and bug reports (`src/app/update.cpp`, `bug_report.cpp`): the repo
   is public and releases are real (v0.1.0 first); publishing one is the

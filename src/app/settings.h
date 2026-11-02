@@ -22,7 +22,7 @@ struct Settings {
     bool sdr_full_range = false;
     int hdr_peak_nits = 1000;
     // How the capture is scaled up to the window (glasir_scaling.lua).
-    enum class Scaling { Mpv, Fsr, Vsr };
+    enum class Scaling { Mpv, Fsr, Vsr, Cnn, Anime4k };
     Scaling scaling = Scaling::Mpv;
     // [frames]
     bool dedup = true;
@@ -44,6 +44,9 @@ struct Settings {
     bool audio_min_period = true;
     // [window]
     bool borderless = true;
+    // window.mode = fullscreen: mpv's own full screen (f, double-click);
+    // borderless is then true too, where leaving it goes.
+    bool fullscreen = false;
     bool skip_black_bars = false;  // full screen: mpv's window takes the picture only (backdrop.h)
     // [launcher]
     bool show_launcher = true;  // Glasir.exe opens its window first
@@ -57,7 +60,7 @@ struct Settings {
 // are logged and skipped. False with a message for a value that makes no sense.
 bool load_settings(const std::wstring &path, Settings &s, std::wstring &error);
 
-// "mpv", "fsr", "vsr": glasir.ini's and glasir_scaling.lua's names.
+// "mpv", "fsr", "vsr", "cnn", "anime4k": glasir.ini's and glasir_scaling.lua's names.
 const wchar_t *scaling_name(Settings::Scaling scaling);
 
 // One setting, as "section.key=value" (the command line's --set).

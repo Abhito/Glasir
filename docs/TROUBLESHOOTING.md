@@ -28,11 +28,12 @@ tests.
 ## VRR / G-SYNC
 
 - In the NVIDIA Control Panel, G-SYNC must be on **for windowed and full
-  screen mode** (Glasir's full screen is a borderless window).
+  screen mode** (Glasir's full screen and borderless modes are both windows
+  that cover the screen; neither is exclusive full screen).
 - G-SYNC follows the focused window: clicking a window on another screen
   turns VRR off for Glasir until you click back into it.
 - Glasir's own full screen covers the whole screen, which keeps VRR. A
-  window smaller than the screen (a window, or full screen with "Skip the
+  window smaller than the screen (a window, or borderless with "Skip the
   black bars") keeps it only while Windows can give it a hardware overlay
   plane (MPO), which other running apps can take away; it is then composed
   by Windows, a frame later, and frame generation reaches only about 100 of
@@ -68,10 +69,12 @@ A capture mode of your screen's height (2560x1440 on a 1440p screen) needs no
 scaling; a 4K capture is scaled down anyway.
 
 For a smaller capture, try "Scaling" in the menu: **FSR 1** gives sharper
-edges on any GPU; **RTX VSR** (NVIDIA RTX) uses the GPU's video engine and
-cleans up compression too. RTX VSR costs some GPU time, which DLSS 5 and
-frame generation also need; if frame generation starts pausing, go back to
-FSR 1. If RTX VSR cannot run, Glasir says so and uses FSR 1.
+edges on any GPU; **VSR** (NVIDIA RTX, Intel) uses the GPU's video engine
+and cleans up compression too; **ArtCNN** rebuilds the most detail on any
+GPU; **Anime4K** suits drawn and cel-shaded games. VSR, ArtCNN and Anime4K
+cost GPU time, which DLSS 5 and frame generation also need; if frame
+generation starts pausing, go back to FSR 1. If VSR cannot run (the driver
+turns it down), Glasir says so and uses FSR 1.
 
 ## The capture card does not open
 

@@ -63,6 +63,7 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
     if (s.borderless) {
         a.push_back(L"--no-border");
         a.push_back(L"--geometry=100%x100%");
+        if (s.fullscreen) a.push_back(L"--fullscreen");  // f leaves it for the borderless window
     } else {
         a.push_back(L"--geometry=1280x720");
     }
@@ -87,6 +88,7 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
         a.push_back(L"--script-opts-append=glasir_scaling-" + key + L"=" + value);
     };
     scaling(L"mode", scaling_name(s.scaling));
+    scaling(L"vsr", plan.vsr);
     scaling(L"hdr", s.hdr ? L"yes" : L"no");
     scaling(L"hdr_peak", std::to_wstring(s.hdr_peak_nits));
 

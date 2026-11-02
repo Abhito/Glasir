@@ -9,6 +9,8 @@ licence. Binaries never go in the repo; Glasir downloads them on the user's PC (
 | `reshade/include/` | ReShade add-on API headers | crosire/reshade tag `v6.8.0` (commit `18deaa52de0c`), `include/` | BSD-3-Clause, `reshade/LICENSE.md` |
 | `mpv/include/mpv/` | mpv client API header (`client.h`) | mpv-player/mpv tag `v0.41.0` (commit `2c219aa822df`), `include/mpv/client.h` | ISC, text at the top of the file |
 | `imgui/` | Dear ImGui: core, DX11 and Win32 backends (the in-game menu, the launcher) | ocornut/imgui tag `v1.92.5` (commit `6d910d5487d1`), the root sources and `backends/imgui_impl_{dx11,win32}` | MIT, `imgui/LICENSE.txt` |
+| `artcnn/` | ArtCNN `C4F16` mpv shader (`video.scaling = cnn`), installed to `engine\portable_config\shaders` | Artoriuz/ArtCNN tag `v1.6.2` (commit `f606e1f0ba7e`), `GLSL/ArtCNN_C4F16.glsl`, `LICENSE` | MIT, `artcnn/LICENSE` |
+| `anime4k/` | Anime4K v4 mpv shaders, mode A (`video.scaling = anime4k`), installed to `engine\portable_config\shaders` | bloc97/Anime4K tag `v4.0.1` (commit `4029bf701eca`), `glsl/Restore/` and `glsl/Upscale/`, `LICENSE` | MIT, `anime4k/LICENSE` (the two AutoDownscalePre files: the Unlicense, text at their top) |
 
 ## SHA-256
 
@@ -38,6 +40,15 @@ b167fc1d43362fae5f4b6fe392b2a692dfd747cff76e1596ee1acba52c5538b7  imgui/backends
 2f8c0eeff769d7829f8293e5e404743d91bd78d9336877961bc627d3a2831bb6  imgui/backends/imgui_impl_dx11.h
 d01d3bc361682aad99f79d59fccdbf03d325b2b3e124d93dfd63168d362adf2c  imgui/backends/imgui_impl_win32.cpp
 7e720e7fc54e348152cf8b29145f3d291da5e9026176a36d08f5b46563f7f672  imgui/backends/imgui_impl_win32.h
+03d0b3d31cb82c898a94a46663021a3e8f02c5a21d69c5cfdf0208de4bfd453e  artcnn/ArtCNN_C4F16.glsl
+285055c4b8b8bcb891685ca9cc6047baf25a8c1cf56e8ab2cbcdecaea0437c0b  artcnn/LICENSE
+8c58291740146bd766a4d73f132775a797fe80f7d07919b5d767e27a5dc85656  anime4k/Anime4K_AutoDownscalePre_x2.glsl
+5af62d8cd844916dc1126613e13bad3beab195787f93a71200b47c6ec78f2e41  anime4k/Anime4K_AutoDownscalePre_x4.glsl
+a2a9bf7fbc1d75d09660ca2e701e4d7fb0cf5457b94da47e1825032fa2b3671a  anime4k/Anime4K_Clamp_Highlights.glsl
+67ea3ed26539e8de3b7d307688535d2ff17e8d147e11dda0247da7770dbecf41  anime4k/Anime4K_Restore_CNN_M.glsl
+716e02098a68f0d648761f2b96b4dd139e1cb09b174bb369fca3aa34328fff7e  anime4k/Anime4K_Upscale_CNN_x2_M.glsl
+4c53ec2e287908f7ee7bcb266b0170421626d663576468b7d7dafc62962649a4  anime4k/Anime4K_Upscale_CNN_x2_S.glsl
+5bad448b737378e3d0c977ad0d0521fa37ad279a7e76ea9a31d9257eeb6953f5  anime4k/LICENSE
 ```
 
 To update: download the files from the new upstream tag, replace them here,

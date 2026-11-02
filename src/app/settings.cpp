@@ -95,7 +95,9 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         if (l == L"mpv") s.scaling = Settings::Scaling::Mpv;
         else if (l == L"fsr") s.scaling = Settings::Scaling::Fsr;
         else if (l == L"vsr") s.scaling = Settings::Scaling::Vsr;
-        else return bad(L"mpv, fsr or vsr");
+        else if (l == L"cnn") s.scaling = Settings::Scaling::Cnn;
+        else if (l == L"anime4k") s.scaling = Settings::Scaling::Anime4k;
+        else return bad(L"mpv, fsr, vsr, cnn or anime4k");
     } else if (name == L"video.hdr_peak_nits") {
         if (!parse_int(value, 80, 10000, n)) return bad(L"80 to 10000");
         s.hdr_peak_nits = int(n);
@@ -146,9 +148,10 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         else return bad(L"minimum or default");
     } else if (name == L"window.mode") {
         const std::wstring l = lower(value);
-        if (l == L"borderless") s.borderless = true;
-        else if (l == L"windowed") s.borderless = false;
-        else return bad(L"borderless or windowed");
+        if (l == L"fullscreen") s.borderless = s.fullscreen = true;
+        else if (l == L"borderless") s.borderless = true, s.fullscreen = false;
+        else if (l == L"windowed") s.borderless = s.fullscreen = false;
+        else return bad(L"fullscreen, borderless or windowed");
     } else if (name == L"window.skip_black_bars") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.skip_black_bars = b;
@@ -173,6 +176,8 @@ const wchar_t *scaling_name(Settings::Scaling scaling) {
     switch (scaling) {
     case Settings::Scaling::Fsr: return L"fsr";
     case Settings::Scaling::Vsr: return L"vsr";
+    case Settings::Scaling::Cnn: return L"cnn";
+    case Settings::Scaling::Anime4k: return L"anime4k";
     default: return L"mpv";
     }
 }
@@ -201,8 +206,11 @@ sdr_range = limited
 ; Peak brightness written into the HDR10 metadata.
 hdr_peak_nits = 1000
 ; How a capture smaller than the window is scaled up (before DLSS 5):
-; mpv (its own Lanczos), fsr (AMD FSR 1: sharper, any GPU) or vsr (NVIDIA
-; RTX Video Super Resolution, RTX GPUs; FSR 1 where it cannot run).
+; mpv (its own Lanczos), fsr (AMD FSR 1: sharper, any GPU), vsr (the GPU's
+; video super resolution: NVIDIA RTX or Intel; FSR 1 where it cannot run),
+; cnn (ArtCNN, a small neural network: the most detail, any GPU, more GPU
+; time) or anime4k (Anime4K: for cel-shaded and drawn styles, any GPU, more
+; GPU time).
 scaling = mpv
 
 [frames]
@@ -250,8 +258,9 @@ delay_ms = 0
 period = minimum
 
 [window]
-; borderless (fills the screen) or windowed. The menu (Tab) switches it and
-; keeps the choice here.
+; fullscreen (mpv's own full screen, as f or a double-click switches it),
+; borderless (a window without a frame that fills the screen) or windowed.
+; The menu (Tab) switches it and keeps the choice here.
 mode = borderless
 ; Full screen on a screen of another shape than the picture (16:9 on an
 ; ultrawide). 0: mpv covers the screen, black bars included. 1: mpv's window

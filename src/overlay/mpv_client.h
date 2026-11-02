@@ -20,7 +20,7 @@ struct MpvState {
     int boost = -1;   // the audio plugin's (user-data/glasir/audio-boost), -1: no plugin
     int delay = -1;   // ms, likewise
     int width = 0, height = 0;  // the video's size
-    std::string scaling;        // glasir_scaling.lua's mode (user-data/glasir/scaling): mpv, fsr, vsr
+    std::string scaling;        // glasir_scaling.lua's mode (user-data/glasir/scaling): mpv, fsr, vsr, cnn, anime4k
 };
 
 // A short message to show over the picture (a toast): from a key mpv

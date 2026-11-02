@@ -24,5 +24,18 @@ target_link_libraries(glasir PRIVATE glasir_app_core glasir_imgui shell32 user32
 
 install(TARGETS glasir RUNTIME DESTINATION .)
 install(FILES mpv_config/mpv.conf mpv_config/input.conf DESTINATION engine/portable_config)
-install(FILES mpv_config/scripts/glasir_scaling.lua DESTINATION engine/portable_config/scripts)
+install(FILES mpv_config/scripts/glasir_scaling.lua mpv_config/scripts/glasir_window.lua
+        DESTINATION engine/portable_config/scripts)
 install(FILES mpv_config/shaders/glasir_fsr1.glsl DESTINATION engine/portable_config/shaders)
+# Third-party mpv shaders, unmodified (third_party/README.md): the cnn and
+# anime4k scaling modes.
+set(glasir_shaders "${PROJECT_SOURCE_DIR}/third_party")
+install(FILES
+    "${glasir_shaders}/artcnn/ArtCNN_C4F16.glsl"
+    "${glasir_shaders}/anime4k/Anime4K_Clamp_Highlights.glsl"
+    "${glasir_shaders}/anime4k/Anime4K_Restore_CNN_M.glsl"
+    "${glasir_shaders}/anime4k/Anime4K_Upscale_CNN_x2_M.glsl"
+    "${glasir_shaders}/anime4k/Anime4K_AutoDownscalePre_x2.glsl"
+    "${glasir_shaders}/anime4k/Anime4K_AutoDownscalePre_x4.glsl"
+    "${glasir_shaders}/anime4k/Anime4K_Upscale_CNN_x2_S.glsl"
+    DESTINATION engine/portable_config/shaders)

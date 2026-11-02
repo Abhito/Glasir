@@ -38,4 +38,10 @@ bool is_rtx50(const GpuInfo &gpu) {
     return std::regex_search(gpu.name, rtx50);
 }
 
+const wchar_t *vsr_kind(const GpuInfo &gpu) {
+    if (gpu.vendor == kVendorNvidia && gpu.name.find(L"RTX") != std::wstring::npos) return L"nvidia";
+    if (gpu.vendor == kVendorIntel) return L"intel";
+    return L"none";
+}
+
 }  // namespace glasir
