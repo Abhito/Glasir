@@ -11,6 +11,8 @@ latency and modern enhancements applied live:
 - **Upscaling**: AMD FSR 1, ArtCNN and Anime4K on any GPU, video super
   resolution on NVIDIA RTX and Intel GPUs, or mpv's own
 - **HDR and SDR** from the same app, switched in the menu
+- **Screenshots** of the picture on screen, with DLSS 5; in HDR also as
+  HDR (`.jxr`)
 - **Low-latency WASAPI audio** from the card, with boost and a delay for lip
   sync
 - A window to pick the card, mode and features before playing, and an
@@ -139,11 +141,19 @@ DLSS 5 and frame generation, so it is sharp and does not lag.
 | `[` / `]` | audio delay -/+ 10 ms (lip sync) |
 | `Ctrl+r` | restart the sound (after changing the output device) |
 | `F6` | DLSS 5 neural rendering on/off (this session) |
+| `F5` | RenoDX-DLSS5's comparison: DLSS 5's input and output, before its colour and tone mapping (in `engine\DLSS5 Screenshots\`) |
+| `F7` | a DLSS 5 shot for RenoDX's Offline Studio (in `Pictures\Offline Studio\Shots\mpv\`; `Shift+F7` opens it) |
 | `F8` | frame generation on/off (this session; needs ReShade) |
 | `F9` | save a bug report, with the frames on screen (in `Bug reports\`) |
-| `s` | screenshot (in `Screenshots\`) |
+| `s` | screenshot of the picture on screen (below) |
 | `q`, `Esc` | quit (`Esc` closes the menu first when it is open) |
 | `Home` | ReShade's overlay |
+
+Screenshots (`s`) go to `Screenshots\`: the picture as it is on screen,
+after scaling and DLSS 5, without the menu, the messages or the black bars.
+In SDR that is a PNG. In HDR there are two files: a `.jxr`, Windows' own
+HDR picture format (Photos shows it in HDR), and a PNG made SDR for
+sharing. Without ReShade, `s` saves the card's picture as it comes in.
 
 DLSS 5 starts with its authors' default settings; tuning it is up to you, in
 ReShade's overlay (`Home`): RenoDX-DLSS5 on the Add-ons tab, DLSS5_Feed on

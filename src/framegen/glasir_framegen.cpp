@@ -1865,6 +1865,8 @@ void FrameGen::stats(double now) {
 // ---- ReShade events -----------------------------------------------------------
 
 void on_reshade_present(reshade::api::effect_runtime *runtime) {
+    // A screenshot first: the back buffer still holds mpv's real frame.
+    glasir::overlay::before_frame_generation(runtime);
     g_gen.on_reshade_present(runtime);
     // The menu last: over the frame in between (or the frame) mpv presents now.
     glasir::overlay::on_reshade_present(runtime);

@@ -21,6 +21,11 @@ struct MpvState {
     int delay = -1;   // ms, likewise
     int width = 0, height = 0;  // the video's size
     std::string scaling;        // glasir_scaling.lua's mode (user-data/glasir/scaling): mpv, fsr, vsr, cnn, anime4k
+    // osd-dimensions: the window's size and the black bars around the video
+    // (margins left, top, right, bottom); w = 0 until known.
+    struct Osd {
+        int w = 0, h = 0, ml = 0, mt = 0, mr = 0, mb = 0;
+    } osd;
 };
 
 // A short message to show over the picture (a toast): from a key mpv
@@ -46,6 +51,8 @@ public:
     // Queues {"command":[words...]}; sent in order.
     void command(const std::vector<std::string> &words);
     Toast toast() const;
+    // How many times "script-message glasir-screenshot" (the s key) came.
+    unsigned screenshot_requests() const;
 
 private:
     void run();
@@ -58,6 +65,7 @@ private:
     mutable std::mutex m_;
     MpvState state_;
     Toast toast_;
+    unsigned screenshots_ = 0;
     bool seen_volume_ = false, seen_mute_ = false;  // since connecting: the first values are no change
     std::vector<std::string> queue_;  // JSON lines
 };

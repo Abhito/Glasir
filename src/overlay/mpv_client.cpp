@@ -13,7 +13,7 @@ namespace {
 // What the menu follows; the ids are the indexes.
 const char *const kProperties[] = {
     "volume", "mute", "fullscreen", "user-data/glasir/audio-boost", "user-data/glasir/audio-delay", "width", "height",
-    "user-data/glasir/scaling",
+    "user-data/glasir/scaling", "osd-dimensions",
 };
 
 int to_int(const Json &v, int fallback) {
@@ -84,6 +84,11 @@ void MpvClient::command(const std::vector<std::string> &words) {
     if (wake_) SetEvent(wake_);
 }
 
+unsigned MpvClient::screenshot_requests() const {
+    std::lock_guard lock(m_);
+    return screenshots_;
+}
+
 Toast MpvClient::toast() const {
     std::lock_guard lock(m_);
     return toast_;
@@ -93,6 +98,11 @@ void MpvClient::on_line(const std::string &line) {
     if (line.find("\"client-message\"") != std::string::npos) {
         const auto j = Json::parse(line);
         const Json *args = j ? j->get("args") : nullptr;
+        if (args && !args->items().empty() && args->items()[0].string() == "glasir-screenshot") {
+            std::lock_guard lock(m_);
+            ++screenshots_;
+            return;
+        }
         if (!args || args->items().size() < 2 || args->items()[0].string() != "glasir-toast") return;
         std::lock_guard lock(m_);
         toast_.text = args->items()[1].string();
@@ -138,6 +148,16 @@ void MpvClient::on_line(const std::string &line) {
     case 5: state_.width = data ? to_int(*data, 0) : 0; break;
     case 6: state_.height = data ? to_int(*data, 0) : 0; break;
     case 7: state_.scaling = data && data->is(Json::Type::String) ? data->string() : ""; break;
+    case 8: {
+        // Where the picture is in the window: its size and the margins (the
+        // black bars) around the video.
+        auto field = [&](const char *name) {
+            const Json *v = data ? data->get(name) : nullptr;
+            return v ? int(v->number()) : 0;
+        };
+        state_.osd = {field("w"), field("h"), field("ml"), field("mt"), field("mr"), field("mb")};
+        break;
+    }
     default: break;
     }
 }
@@ -173,6 +193,9 @@ void MpvClient::run() {
         for (size_t i = 0; i < std::size(kProperties); ++i)
             observe += "{\"command\":[\"observe_property\"," + std::to_string(i + 1) + "," + json_quote(kProperties[i]) +
                        "]}\n";
+        // Says that this add-on takes Glasir's screenshots (the s key), so
+        // glasir_screenshot.lua leaves them to it.
+        observe += "{\"command\":[\"set_property\",\"user-data/glasir/screenshot\",\"overlay\"]}\n";
         bool ok = write(observe);
         if (ok) {
             std::lock_guard lock(m_);

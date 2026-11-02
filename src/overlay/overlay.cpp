@@ -18,6 +18,7 @@
 #include "compositor.h"
 #include "menu.h"
 #include "mpv_client.h"
+#include "screenshot.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -62,6 +63,9 @@ struct Overlay {
     std::string local_text;
     double local_seconds = 1.5;
     unsigned local_serial = 0, local_seen = 0;
+    // Screenshots: the one being read back, and the requests seen.
+    shot::Grabber shots;
+    unsigned shots_seen = 0;
 };
 
 Overlay g;
@@ -260,6 +264,27 @@ void poll_toasts(double now) {
 
 bool toast_showing() { return now_seconds() < g.toast_until; }
 
+void shot_done(bool ok, const std::string &text) {
+    reshade::log::message(ok ? reshade::log::level::info : reshade::log::level::error,
+                          ("Glasir screenshot: " + std::string(ok ? "saved " : "failed: ") + text).c_str());
+    toast(ok ? "Screenshot saved" : "Screenshot failed, see ReShade.log");
+}
+
+// The picture's part of a width x height back buffer: without mpv's black
+// bars (osd-dimensions, scaled if the window is not the back buffer's size).
+D3D11_BOX picture_box(const MpvState::Osd &osd, UINT width, UINT height) {
+    D3D11_BOX box{0, 0, 0, width, height, 1};
+    if (osd.w <= 0 || osd.h <= 0) return box;
+    const double sx = double(width) / osd.w, sy = double(height) / osd.h;
+    const auto at = [](double v, UINT limit) { return UINT(std::clamp(std::lround(v), 0L, long(limit))); };
+    D3D11_BOX picture{at(osd.ml * sx, width), at(osd.mt * sy, height), 0, at(width - osd.mr * sx, width),
+                      at(height - osd.mb * sy, height), 1};
+    if (picture.right - picture.left < 16 || picture.bottom - picture.top < 16 || picture.right <= picture.left ||
+        picture.bottom <= picture.top)
+        return box;  // margins that make no sense: the whole frame
+    return picture;
+}
+
 }  // namespace
 
 void set_host(const Host &host) { g.host = host; }
@@ -274,6 +299,30 @@ void toast(const std::string &text, double seconds) {
 void note_color_space(reshade::api::color_space color_space) { g.color_space = color_space; }
 
 bool menu_open() { return g.open; }
+
+void before_frame_generation(reshade::api::effect_runtime *runtime) {
+    reshade::api::device *api_device = runtime->get_device();
+    if (api_device->get_api() != reshade::api::device_api::d3d11) return;
+    auto *device = reinterpret_cast<ID3D11Device *>(api_device->get_native());
+    auto *swapchain = reinterpret_cast<IDXGISwapChain *>(runtime->get_native());
+    if (!device || !swapchain || !g.device || device != g.device) return;  // the menu's device is mpv's
+    g.shots.tick(g.context.Get(), shot_done);
+    const unsigned asked = g.mpv.screenshot_requests();
+    if (asked == g.shots_seen) return;
+    g.shots_seen = asked;
+    if (g.shots.busy()) {
+        toast("Screenshot: still saving the last one");
+        return;
+    }
+    ComPtr<ID3D11Texture2D> back_buffer;
+    if (FAILED(swapchain->GetBuffer(0, IID_PPV_ARGS(&back_buffer)))) return;
+    D3D11_TEXTURE2D_DESC bb{};
+    back_buffer->GetDesc(&bb);
+    std::string error;
+    if (!g.shots.grab(device, g.context.Get(), back_buffer.Get(), encoding_of(g.color_space.load()),
+                      picture_box(g.mpv.state().osd, bb.Width, bb.Height), error))
+        shot_done(false, error);
+}
 
 void on_reshade_present(reshade::api::effect_runtime *runtime) {
     g.runtime = nullptr;
@@ -322,6 +371,7 @@ void draw_again(ID3D11DeviceContext *context, ID3D11Texture2D *back_buffer) {
 }
 
 void release() {
+    g.shots.release();
     g.mpv.stop();
     g.mpv_started = false;
     g.toast_until = 0;

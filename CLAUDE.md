@@ -16,7 +16,12 @@
   (ffmpeg test pattern -> `Glasir.exe --input-raw -` -> mpv, checked over
   IPC). Scaling modes: `python tools/scaling_check.py [--format p010 --hdr]
   [--window 2560x1440 --size 1920x1080]` (switches each mode, checks the
-  shaders / VSR filter, prints mpv's GPU time per pass). With the card, in a small window: `python tools/probe.py [--set ...]`;
+  shaders / VSR filter, prints mpv's GPU time per pass). Screenshots (`s`,
+  src/overlay/screenshot.h): `python tools/screenshot_check.py [--hdr]`
+  (removes its files from `out\Glasir\Screenshots`, the owner's folder);
+  the HDR tone mapping on game frames: `shot_convert.exe
+  Captures\<when>\f01.png OUT` (build\vs\src\overlay\Release), compare with
+  libplacebo. With the card, in a small window: `python tools/probe.py [--set ...]`;
   `--grab N` saves N decoded frames (HDR tone-mapped) to `%TEMP%\glasir_grabs\`
   so you can look at them (downscale before viewing: 2560x1440 PNGs).
   Both open a window for a few seconds. Glasir allows one instance; its IPC

@@ -45,6 +45,12 @@ struct Host {
 };
 void set_host(const Host &host);
 
+// ReShade's reshade_present for mpv's swap chain, before frame generation
+// draws the frame in between into the back buffer: takes Glasir's
+// screenshot (the s key, screenshot.h) of mpv's real frame when one was
+// asked for, and finishes one under way.
+void before_frame_generation(reshade::api::effect_runtime *runtime);
+
 // ReShade's reshade_present for mpv's swap chain, after frame generation:
 // reads input, builds the menu and draws it on the back buffer (the image
 // mpv presents now).

@@ -270,6 +270,11 @@ int main() {
         expect(ini.find("TutorialProgress=1") != std::string::npos, "an existing ReShade value is not overwritten");
         expect(ini.find("NeuralUplift=1") != std::string::npos && ini.find("[GLASIR_FRAMEGEN]") != std::string::npos,
                "DLSS 5 and frame generation keys written");
+        expect(ini.find("NRScreenshotSource=2") != std::string::npos, "F5 screenshots: model buffers, not Auto");
+        WritePrivateProfileStringW(L"RenoDX.DLSS5", L"NRScreenshotSource", L"1", (engine + L"\\ReShade.ini").c_str());
+        write_reshade_config(engine, s, true, true);
+        expect(read(L"\\ReShade.ini").find("NRScreenshotSource=1") != std::string::npos,
+               "F5 screenshots: a source other than Auto is kept");
         expect(read(L"\\ReShadePreset.ini").rfind("Techniques=Lumenite_Kernel@lumenite_Kernel.fx,DLSS5_Feed", 0) == 0,
                "preset enables the DLSS 5 effects");
         expect(read(L"\\dlss5-feed.cfg").empty(), "DLSS 5 on: the Feeder's file is left for the Feeder to write");

@@ -113,6 +113,15 @@ void write_reshade_config(const std::wstring &engine_dir, const Settings &s, boo
     // whether it shows is the effects' state (the menu switches them; RenoDX's
     // own key, F6, toggles its part for the session).
     put(ini, L"RenoDX.DLSS5", L"NeuralUplift", dlss5_loaded ? L"1" : L"0");
+    // RenoDX's screenshot key (F5): its Auto source (0, its default) takes
+    // the presented frame, which here is mpv's window, not the picture DLSS 5
+    // made (the Feeder runs it on a device of its own), so F5 saved nothing
+    // ("this presentation window does not carry the enhanced game image").
+    // The evaluated model buffers (2) are DLSS 5's input and output. Auto
+    // is replaced on every start; any other choice is the user's.
+    wchar_t source[8] = {};
+    GetPrivateProfileStringW(L"RenoDX.DLSS5", L"NRScreenshotSource", L"0", source, 8, ini.c_str());
+    if (std::wstring(source) == L"0") put(ini, L"RenoDX.DLSS5", L"NRScreenshotSource", L"2");
     const std::wstring preset = engine_dir + L"\\ReShadePreset.ini";
     put_plain(preset, "Techniques", dlss5_loaded && dlss5_on ? kDlss5Techniques : "");
     put_plain(preset, "TechniqueSorting", kDlss5Techniques);
