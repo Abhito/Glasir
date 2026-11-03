@@ -1,8 +1,34 @@
 # Glasir
 
-Modern PC graphics for game consoles. Glasir shows your console (PS5,
-Switch 2, Xbox Series, ...) through a capture card on your Windows PC, with low
-latency and modern enhancements applied live:
+**Your console, with PC graphics.**
+
+Plug your PS5, Xbox Series or Switch 2 into a capture card and play it on
+your Windows PC, with frame generation, DLSS 5 and AI upscaling applied live.
+No calibration and no tweaking: pick your card and press **Play**.
+
+**[Download Glasir](https://github.com/Abhito/Glasir/releases/latest)**
+for Windows 11 · [How to install](#installing)
+
+- **30 fps games, smooth at 60.** Frame generation that runs on any GPU:
+  NVIDIA, AMD or Intel.
+- **HDR that looks right from the start.** SDR and HDR from the same app,
+  with nothing to calibrate.
+- **DLSS 5 neural rendering** on NVIDIA RTX 50 series GPUs.
+- **Sharper than the card sends it.** A 1080p capture scaled up to your
+  screen by a neural network, not just stretched.
+- **Made for the couch and the desk.** Low latency, VRR pacing, the card's
+  own sound, and a menu you open with one key.
+
+Made for games that are console-only, like **GTA VI** at launch on PS5 and
+Xbox Series, or **The Legend of Zelda: Ocarina of Time** on Switch 2: play
+them on your PC screen, smoother and sharper than the capture card shows
+them.
+
+> Frame generation makes motion smoother. It does not make the game react
+> faster: the console still runs at its own rate, and the generated frames
+> add a few milliseconds.
+
+## What it does
 
 - **Frame generation** (30 → 60, 60 → 120 fps), motion-compensated, any GPU
 - **VRR / G-SYNC / FreeSync** pacing, with repeated frames from the card
@@ -23,9 +49,10 @@ latency and modern enhancements applied live:
 ## Requirements
 
 - Windows 11, 64-bit
-- A capture card. Cards Windows' Media Foundation can open get everything;
-  other cards are opened through DirectShow, without dedup and frame
-  generation (Glasir says so). No guarantees for any card.
+- A capture card. Cards that Windows' own video capture can open get every
+  feature. Other cards run in a basic mode, without frame generation and
+  without dropping repeated frames, and Glasir tells you when that
+  happens. We can't promise that every card works.
 - Any DirectX 11 GPU for frame generation and upscaling; an NVIDIA RTX or
   Intel GPU for video super resolution; an NVIDIA RTX 50 series GPU for DLSS 5
 - A VRR screen (G-SYNC or FreeSync) is best for frame pacing, but not
@@ -46,6 +73,9 @@ Reports from other setups are welcome (see
 [Something wrong?](#something-wrong)).
 
 ## Installing
+
+**[Download the latest Glasir](https://github.com/Abhito/Glasir/releases/latest)**
+(`Glasir-x.y.z.zip`, under "Assets").
 
 1. Unzip `Glasir-x.y.z.zip` into a folder you can write to (for example
    `C:\Games\Glasir`; not Program Files, because Glasir keeps its settings,
@@ -141,8 +171,6 @@ DLSS 5 and frame generation, so it is sharp and does not lag.
 | `[` / `]` | audio delay -/+ 10 ms (lip sync) |
 | `Ctrl+r` | restart the sound (after changing the output device) |
 | `F6` | DLSS 5 neural rendering on/off (this session) |
-| `F5` | RenoDX-DLSS5's comparison: DLSS 5's input and output, before its colour and tone mapping (in `engine\DLSS5 Screenshots\`) |
-| `F7` | a DLSS 5 shot for RenoDX's Offline Studio (in `Pictures\Offline Studio\Shots\mpv\`; `Shift+F7` opens it) |
 | `F8` | frame generation on/off (this session; needs ReShade) |
 | `F9` | save a bug report, with the frames on screen (in `Bug reports\`) |
 | `s` | screenshot of the picture on screen (below) |
@@ -235,6 +263,9 @@ by TyRaS-SW (MIT). Its WASAPI audio plugin is by
 and RenoDX-DLSS5. Built on [mpv](https://mpv.io) and
 [ReShade](https://reshade.me) by crosire.
 
-Glasir is not affiliated with or endorsed by NVIDIA, AMD, Sony, Nintendo,
-Microsoft, or the authors of the projects above. DLSS, G-SYNC and RTX are
-trademarks of NVIDIA Corporation; other names belong to their owners.
+Glasir is not affiliated with or endorsed by NVIDIA, AMD, Intel, Sony,
+Nintendo, Microsoft, Rockstar Games, Take-Two Interactive, or the authors of
+the projects above. DLSS, G-SYNC and RTX are trademarks of NVIDIA
+Corporation; Grand Theft Auto and GTA are trademarks of Take-Two
+Interactive; The Legend of Zelda is a trademark of Nintendo; other names
+belong to their owners.
