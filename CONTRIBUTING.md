@@ -41,7 +41,7 @@ which adds `Signed-off-by: Your Name <you@example.com>`.
 
 ## Building and testing
 
-See [README.md](README.md#building). Run `build.cmd` before sending a
+See [README.md](README.md#-building). Run `build.cmd` before sending a
 change; it builds everything and runs the tests. Changes to capture,
 frame generation or pacing should also be tried with a real capture card
 when possible; say in the pull request what you tested on (GPU, card,
