@@ -370,7 +370,7 @@ struct Screen {
     const Choice original;
     const Found *found = nullptr;
     bool dlss5_installed = false;
-    bool dlss5_forced = false;  // glasir.ini: [dlss5] enabled = on (try without an RTX 50)
+    bool dlss5_forced = false;  // glasir.ini: [dlss5] enabled = on (try on any GPU)
     std::string versions;  // "mpv 20261031  ·  ReShade 6.8.0  ·  DLSS 5 10.8.0", "" if none
     const LauncherExtras *extras = nullptr;
     Release release;  // the newer Glasir, once the update check found one
@@ -478,14 +478,15 @@ void draw(Screen &s) {
     }
 
     heading("ENHANCEMENTS");
-    const bool rtx50 = f && is_rtx50(f->gpu);
+    const bool nr_gpu = f && dlss5_gpu(f->gpu);
     const bool forced = s.dlss5_forced;
-    if (!s.dlss5_installed || !(rtx50 || forced)) ImGui::BeginDisabled();
-    bool dlss5 = c.dlss5 && s.dlss5_installed && (rtx50 || forced);
+    if (!s.dlss5_installed || !(nr_gpu || forced)) ImGui::BeginDisabled();
+    bool dlss5 = c.dlss5 && s.dlss5_installed && (nr_gpu || forced);
     if (ImGui::Checkbox("DLSS 5 neural rendering", &dlss5)) c.dlss5 = dlss5;
-    if (!s.dlss5_installed || !(rtx50 || forced)) ImGui::EndDisabled();
-    if (f && !rtx50 && !forced)
-        dim("Needs an NVIDIA RTX 50 series GPU" + (f->gpu.found ? " (this PC: " + utf8(f->gpu.name) + ")." : std::string(".")));
+    if (!s.dlss5_installed || !(nr_gpu || forced)) ImGui::EndDisabled();
+    if (f && !nr_gpu && !forced)
+        dim("Needs an NVIDIA RTX 30, 40 or 50 series GPU" +
+            (f->gpu.found ? " (this PC: " + utf8(f->gpu.name) + ")." : std::string(".")));
     else if (f && !s.dlss5_installed) {
         dim("Not downloaded yet (about 250 MB).");
         if (ImGui::Button("Download DLSS 5")) {
@@ -607,7 +608,7 @@ void draw(Screen &s) {
 }
 
 // What changed goes into glasir.ini; what did not stays as the user wrote it.
-void save(const std::wstring &path, const Choice &c, const Choice &o, bool rtx50) {
+void save(const std::wstring &path, const Choice &c, const Choice &o, bool nr_gpu) {
     std::vector<SettingValue> v;
     auto num = [](double d) { return d == std::floor(d) ? std::format(L"{:.0f}", d) : std::format(L"{:.3f}", d); };
     if (c.device != o.device) v.push_back({L"capture", L"device", c.device});
@@ -617,7 +618,7 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool rtx50
         v.push_back({L"capture", L"fps", num(c.fps)});
     }
     if (c.hdr != o.hdr) v.push_back({L"video", L"mode", c.hdr ? L"hdr" : L"sdr"});
-    if (c.dlss5 != o.dlss5) v.push_back({L"dlss5", L"enabled", c.dlss5 ? (rtx50 ? L"auto" : L"on") : L"off"});
+    if (c.dlss5 != o.dlss5) v.push_back({L"dlss5", L"enabled", c.dlss5 ? (nr_gpu ? L"auto" : L"on") : L"off"});
     if (c.framegen != o.framegen) v.push_back({L"framegen", L"enabled", c.framegen ? L"1" : L"0"});
     if (c.fast != o.fast) v.push_back({L"framegen", L"quality", c.fast ? L"fast" : L"high"});
     if (c.audio != o.audio) v.push_back({L"audio", L"enabled", c.audio ? L"1" : L"0"});
@@ -772,7 +773,7 @@ LauncherAction run_launcher(const std::wstring &settings_path, const std::wstrin
     }
 
     // Kept for Play, and before setup (the window comes back after it).
-    if (screen.finished) save(settings_path, screen.c, screen.original, screen.found && is_rtx50(screen.found->gpu));
+    if (screen.finished) save(settings_path, screen.c, screen.original, screen.found && dlss5_gpu(screen.found->gpu));
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();

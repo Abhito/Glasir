@@ -112,7 +112,7 @@ std::optional<std::vector<Component>> ask_setup(const SetupChoice &choice) {
     c.nDefaultButton = kDownload;
     c.dwCommonButtons = TDCBF_CANCEL_BUTTON;
     if (choice.offer_dlss5) {
-        c.pszVerificationText = L"Also download DLSS 5 (NVIDIA RTX 50 series, about 250 MB)";
+        c.pszVerificationText = L"Also download DLSS 5 (NVIDIA RTX 30, 40 or 50 series, about 250 MB)";
         c.pszFooter = footer.c_str();
     }
     c.pfCallback = links;

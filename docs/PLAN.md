@@ -22,7 +22,10 @@ credit. MPV-SW-Capture stays the owner's daily app until this one replaces it.
 - One GPU. Second-GPU offload (frame gen / depth on another GPU) is a later add-on.
 - All GPU vendors: frame generation, VRR pacing, dedup and upscaling must work
   on AMD and Intel too. NVIDIA-only features turn on only when detected:
-  - DLSS 5: NVIDIA RTX 50 series minimum (RTX 30/40 unlock mods maybe later).
+  - DLSS 5: NVIDIA RTX 30, 40 and 50 series. NVIDIA's nvngx_dlssnr.dll 310.9.16
+    runs on them all (310.8 needed an RTX 50; RHI's mirror labels its builds
+    by GPU). RTX 20: `[dlss5] enabled = on` tries it. RTX Encore
+    (SilyNoMeta/rtx-encore, closed source) was looked at and not needed.
   - RTX Video Super Resolution.
 - Capture cards: best effort, no guarantees. Goal: any card MPV-SW-Capture
   works with. Our Media Foundation capture (dedup, frame gen) first, with
@@ -123,7 +126,7 @@ Each step tested against the real capture card before the next:
 4. Frame generation add-on + VRR hold + send-repeats. *(done: src/framegen, MPL-2.0;
    same shaders and scores as the prototype; VRR measurement tools not ported yet)*
 5. DLSS 5 (Feeder + RenoDX-DLSS5) wiring. *(done: download, [dlss5]
-   auto/on/off with RTX 50 detection; nvngx_dlss.dll from NVIDIA's own SDK works)*
+   auto/on/off with RTX 30/40/50 detection; nvngx_dlss.dll from NVIDIA's own SDK works)*
 6. Installer (component downloads) + settings file. *(done: Glasir.exe is its own
    installer: release zip, first start asks and downloads mpv, ReShade and DLSS 5
    (`--setup` to update); volume, boost and delay changed while playing are kept

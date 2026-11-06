@@ -18,8 +18,9 @@ constexpr unsigned kVendorIntel = 0x8086;
 // the first hardware adapter.
 GpuInfo display_gpu();
 
-// DLSS 5 neural rendering needs an RTX 50 series GPU.
-bool is_rtx50(const GpuInfo &gpu);
+// DLSS 5 neural rendering runs on RTX 30, 40 and 50 series GPUs (NVIDIA's
+// nvngx_dlssnr.dll 310.9.16 and newer; 310.8 ran on RTX 50 only).
+bool dlss5_gpu(const GpuInfo &gpu);
 
 // The video super resolution the GPU's video processor may have, as mpv's
 // d3d11vpp scaling-mode names it: "nvidia" (RTX), "intel", or "none". The

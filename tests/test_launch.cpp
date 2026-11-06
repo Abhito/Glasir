@@ -468,6 +468,25 @@ int main() {
         expect(std::wstring(vsr_kind(gpu)) == L"intel", "VSR: Intel");
         gpu = {L"AMD Radeon RX 7900 XTX", 0x1002, true};
         expect(std::wstring(vsr_kind(gpu)) == L"none", "VSR: none on AMD");
+
+        // DLSS 5 neural rendering: RTX 30, 40 and 50 series.
+        auto nr = [](const wchar_t *name, unsigned vendor = kVendorNvidia) {
+            return dlss5_gpu(GpuInfo{name, vendor, true});
+        };
+        expect(nr(L"NVIDIA GeForce RTX 5070 Ti") && nr(L"NVIDIA GeForce RTX 4070 SUPER") &&
+                   nr(L"NVIDIA GeForce RTX 3060 Laptop GPU") && nr(L"NVIDIA GeForce RTX 3090") &&
+                   nr(L"NVIDIA GeForce RTX 4060") && nr(L"NVIDIA GeForce RTX 5090"),
+               "DLSS 5: GeForce RTX 30, 40 and 50");
+        expect(nr(L"NVIDIA RTX A4000") && nr(L"NVIDIA RTX 4000 Ada Generation") &&
+                   nr(L"NVIDIA RTX PRO 6000 Blackwell Workstation Edition"),
+               "DLSS 5: workstation RTX of the same generations");
+        for (const char *name : {"NVIDIA GeForce RTX 2080 Ti", "NVIDIA GeForce RTX 2050", "Quadro RTX 4000",
+                                 "Quadro RTX 5000", "Quadro RTX 6000", "Quadro RTX 8000", "NVIDIA GeForce GTX 1660",
+                                 "NVIDIA GeForce MX570"}) {
+            const std::string what = std::string("DLSS 5: not on ") + name;
+            expect(!nr(std::wstring(name, name + std::strlen(name)).c_str()), what.c_str());
+        }
+        expect(!nr(L"NVIDIA GeForce RTX 3060", 0x1002), "DLSS 5: not on another vendor");
     }
     {
         // Full screen without the bars: where the picture goes (backdrop.h).

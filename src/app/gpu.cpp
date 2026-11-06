@@ -31,11 +31,13 @@ GpuInfo display_gpu() {
     return primary.found ? primary : first;
 }
 
-bool is_rtx50(const GpuInfo &gpu) {
+bool dlss5_gpu(const GpuInfo &gpu) {
     if (gpu.vendor != kVendorNvidia) return false;
-    // GeForce RTX 5050 ... 5090, desktop and laptop.
-    static const std::wregex rtx50(L"RTX\\s*50[5-9]0", std::regex::icase);
-    return std::regex_search(gpu.name, rtx50);
+    // GeForce RTX 3050 ... 5090, desktop and laptop, and the workstation
+    // cards of the same generations (RTX A4000, RTX 4000 Ada Generation,
+    // RTX PRO 6000 Blackwell).
+    static const std::wregex nr(L"RTX\\s*[345]0[5-9]0|RTX\\s*A\\d{3,4}\\b|\\bAda\\b|Blackwell", std::regex::icase);
+    return std::regex_search(gpu.name, nr);
 }
 
 const wchar_t *vsr_kind(const GpuInfo &gpu) {

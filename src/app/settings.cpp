@@ -235,10 +235,10 @@ quality = high
 all_frames_when_off = 1
 
 [dlss5]
-; DLSS 5 neural rendering (NVIDIA RTX 50 series). auto: on with an RTX 50
-; GPU, off otherwise. on: always try (e.g. with an unlock for older GPUs).
-; off: starts off; on an RTX 50 the menu (Tab) can switch it on. F6 toggles
-; it while playing.
+; DLSS 5 neural rendering (NVIDIA RTX 30, 40 and 50 series). auto: on with
+; one of those GPUs, off otherwise. on: always try (e.g. an RTX 20). off:
+; starts off; on an RTX 30, 40 or 50 the menu (Tab) can switch it on. F6
+; toggles it while playing.
 enabled = auto
 
 [audio]

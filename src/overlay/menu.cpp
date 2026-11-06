@@ -148,7 +148,7 @@ void picture(const MenuFrame &f, const MpvState &mpv) {
         bool off = false;
         ImGui::Checkbox("DLSS 5", &off);
         ImGui::EndDisabled();
-        note("Not available: needs an NVIDIA RTX 50 series GPU and its download (Glasir.exe --setup).");
+        note("Not available: needs an NVIDIA RTX 30, 40 or 50 series GPU and its download (Glasir.exe --setup).");
     } else {
         bool on = rt->get_technique_state(feed);
         static double switched_on = -100;
