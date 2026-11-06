@@ -26,7 +26,7 @@ for Windows 11 · [How to install](#-installing)
   (30 → 60, 60 → 120 fps) on any GPU: NVIDIA, AMD or Intel.
 - **HDR that looks right from the start.** SDR and HDR from the same app,
   switched in the menu, with nothing to calibrate.
-- **DLSS 5 neural rendering** on NVIDIA RTX 50 series GPUs.
+- **DLSS 5 neural rendering** on NVIDIA RTX 30, 40 and 50 series GPUs.
 - **Sharper than the card sends it.** A 1080p capture scaled up to your
   screen by a neural network, not just stretched (see [Scaling](#scaling)).
 - **Even frame pacing.** VRR / G-SYNC / FreeSync support, and repeated
@@ -52,7 +52,7 @@ for Windows 11 · [How to install](#-installing)
 |---|---|
 | **System** | Windows 11, 64-bit |
 | **Capture card** | Any card Windows' own video capture can open gets every feature. Other cards run in a basic mode (no frame generation, no dropping of repeated frames), and Glasir tells you when that happens. |
-| **GPU** | Any DirectX 11 GPU for frame generation and upscaling. NVIDIA RTX or Intel for video super resolution. NVIDIA RTX 50 series for DLSS 5. |
+| **GPU** | Any DirectX 11 GPU for frame generation and upscaling. NVIDIA RTX or Intel for video super resolution. NVIDIA RTX 30, 40 or 50 series for DLSS 5 (it takes more GPU time on the older ones). |
 | **Screen** | A VRR screen (G-SYNC or FreeSync) is best for frame pacing, but not needed. |
 
 We can't promise that every capture card works.
@@ -91,7 +91,7 @@ To remove Glasir, delete its folder.
 
 - [mpv](https://github.com/zhongfly/mpv-winbuild)
 - [ReShade](https://reshade.me) with add-on support
-- DLSS 5, on an NVIDIA RTX 50 series GPU only: DLSS5-Feeder, RenoDX-DLSS5
+- DLSS 5, on an NVIDIA RTX 30, 40 or 50 series GPU: DLSS5-Feeder, RenoDX-DLSS5
   and NVIDIA's neural rendering from
   [RHI's mirror](https://github.com/RankFTW/rhi-repo),
   [NVIDIA DLSS](https://github.com/NVIDIA/DLSS), LumeniteFX
@@ -136,7 +136,7 @@ press **Play**.
   file. What you change while playing (volume, boost, audio delay, the menu)
   is saved there too.
 - The card's own audio input is found automatically. DLSS 5 turns itself on
-  with an NVIDIA RTX 50 series GPU (`[dlss5] enabled = auto`).
+  with an NVIDIA RTX 30, 40 or 50 series GPU (`[dlss5] enabled = auto`).
 
 ### Keys
 
@@ -259,7 +259,7 @@ This configures, builds, runs the tests and puts the portable app folder in
 `out\Glasir`. Third-party programs are not in the repo:
 
 ```
-out\Glasir\Glasir.exe --setup --no-dialogs   # mpv, ReShade (and DLSS 5 on RTX 50) into out\Glasir\engine
+out\Glasir\Glasir.exe --setup --no-dialogs   # mpv, ReShade (and DLSS 5 on RTX 30/40/50) into out\Glasir\engine
 out\Glasir\Glasir.exe --list                 # the capture cards and their modes
 ```
 

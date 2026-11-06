@@ -91,8 +91,13 @@ Glasir finds and their modes.
 
 ## DLSS 5 is not available
 
-DLSS 5 needs an NVIDIA RTX 50 series GPU and its download: the **Update**
+DLSS 5 needs an NVIDIA RTX 30, 40 or 50 series GPU and its download: the **Update**
 button in Glasir's window, or `Glasir.exe --setup`.
+
+On RTX 30 and 40 series GPUs DLSS 5 takes more GPU time than on an RTX 50
+(about 1.5 times as much on an RTX 4070 SUPER as on an RTX 5070 Ti). If the
+picture stutters with it on, turn it off in the menu (Tab) or with the
+launcher's checkbox; both keep it off. F6 turns it off until Glasir closes.
 
 ## Glasir closed by itself
 

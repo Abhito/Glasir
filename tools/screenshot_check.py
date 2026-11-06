@@ -10,7 +10,7 @@ seconds.
 
     python tools/screenshot_check.py
     python tools/screenshot_check.py --hdr          # 10-bit PQ: .jxr and a tone-mapped PNG
-    python tools/screenshot_check.py --hdr --dlss5  # with DLSS 5 on (RTX 50)
+    python tools/screenshot_check.py --hdr --dlss5  # with DLSS 5 on (enabled = on: any GPU)
     python tools/screenshot_check.py --fallback     # glasir_screenshot.lua: mpv's own shot too
 
 The tone mapping itself is tried on game frames with shot_convert.exe

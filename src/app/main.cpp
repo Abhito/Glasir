@@ -28,8 +28,8 @@
 //
 // --setup downloads (or updates) the programs Glasir runs on: it asks which,
 // or with --no-dialogs takes --components (default: mpv, ReShade, and DLSS 5
-// if it is there already or the GPU is an RTX 50). The first start does the
-// same when mpv or ReShade is missing.
+// if it is there already or the GPU is an RTX 30, 40 or 50). The first start
+// does the same when mpv or ReShade is missing.
 //
 // --update installs the newest Glasir from its GitHub releases if it is
 // newer (update.h); --update-from installs a release zip from disk. The
@@ -601,7 +601,7 @@ enum class SetupResult { Play, Stop, Failed };
 SetupResult setup(const Args &args, const std::wstring &dir, const std::wstring &engine) {
     const bool need = !component_installed(engine, Component::Mpv) || !component_installed(engine, Component::ReShade);
     if (!args.setup && !need) return SetupResult::Play;
-    const bool dlss5_default = component_installed(engine, Component::Dlss5) || is_rtx50(display_gpu());
+    const bool dlss5_default = component_installed(engine, Component::Dlss5) || dlss5_gpu(display_gpu());
     std::vector<Component> which;
     if (!args.dialogs) {
         // Nothing is downloaded unasked when no one can be asked.
@@ -823,9 +823,9 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     const GpuInfo gpu = display_gpu();
     plan.vsr = vsr_kind(gpu);
     if (reshade_installed(engine)) {
-        // DLSS 5: auto runs it on an RTX 50 GPU; on tries any GPU.
+        // DLSS 5: auto runs it on an RTX 30, 40 or 50 GPU; on tries any GPU.
         const bool installed = dlss5_installed(engine);
-        const bool loaded = installed && (s.dlss5 == Settings::Dlss5::On || is_rtx50(gpu));
+        const bool loaded = installed && (s.dlss5 == Settings::Dlss5::On || dlss5_gpu(gpu));
         const bool dlss5 = loaded && s.dlss5 != Settings::Dlss5::Off;
         write_reshade_config(engine, s, loaded, dlss5);
         log(L"ReShade: on; frame generation {}{}", s.framegen ? L"on" : L"off",
@@ -836,7 +836,7 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
         else if (loaded && !dlss5)
             why = L" (glasir.ini; the menu can switch it on)";
         else if (!dlss5)
-            why = L" (needs an RTX 50 series GPU; [dlss5] enabled = on tries anyway)";
+            why = L" (needs an RTX 30, 40 or 50 series GPU; [dlss5] enabled = on tries anyway)";
         log(L"DLSS 5: {}{}; GPU: {}", dlss5 ? L"on" : L"off", why, gpu.found ? gpu.name : L"unknown");
     } else {
         log(L"ReShade is not in {}: no frame generation or DLSS 5", engine);
