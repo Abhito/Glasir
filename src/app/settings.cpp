@@ -82,8 +82,14 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         else return bad(L"auto, mediafoundation or directshow");
     } else if (name == L"video.mode") {
         const std::wstring l = lower(value);
-        if (l == L"sdr") s.hdr = false;
-        else if (l == L"hdr") s.hdr = true;
+        if (l == L"sdr") s.hdr = false, s.hdr_auto = false;
+        else if (l == L"hdr") s.hdr = true, s.hdr_auto = false;
+        else if (l == L"auto") s.hdr_auto = true, s.hdr = false;
+        else return bad(L"auto, sdr or hdr");
+    } else if (name == L"video.auto_found") {
+        const std::wstring l = lower(value);
+        if (l == L"sdr") s.auto_found_hdr = false;
+        else if (l == L"hdr") s.auto_found_hdr = true;
         else return bad(L"sdr or hdr");
     } else if (name == L"video.sdr_range") {
         const std::wstring l = lower(value);
@@ -199,11 +205,19 @@ fps = 0
 path = auto
 
 [video]
-; sdr or hdr. HDR needs a card with a 10-bit (P010) mode and HDR on the console.
-mode = sdr
+; auto, sdr or hdr. auto: Glasir captures in the card's 10-bit (P010) mode,
+; tells from the picture whether the console sends SDR or HDR, and follows it
+; when that changes (the picture starts again); a card without a 10-bit mode
+; is SDR. sdr and hdr say it yourself: hdr needs a 10-bit mode and HDR on the
+; console, sdr also offers the card's 8-bit modes (often larger or faster).
+mode = auto
+; What auto found the last time (Glasir writes this): how it starts.
+auto_found = hdr
 ; The SDR signal's range: limited (most consoles) or full.
 sdr_range = limited
-; Peak brightness written into the HDR10 metadata.
+; The brightest the console is taken to send, in nits. HDR is shown as it
+; comes, up to what the display can show; on a display dimmer than this value
+; the picture is tone-mapped down from it instead.
 hdr_peak_nits = 1000
 ; How a capture smaller than the window is scaled up (before DLSS 5):
 ; mpv (its own Lanczos), fsr (AMD FSR 1: sharper, any GPU), vsr (the GPU's

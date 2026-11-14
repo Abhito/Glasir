@@ -18,7 +18,12 @@ struct Settings {
     double fps = 0;
     CapturePath path = CapturePath::Auto;
     // [video]
+    // mode = auto: a 10-bit capture, shown as what the signal turns out to
+    // be (signal_kind.h). hdr is then what it is shown as: what was found
+    // last time (auto_found) until the picture says otherwise.
+    bool hdr_auto = true;
     bool hdr = false;
+    bool auto_found_hdr = true;
     bool sdr_full_range = false;
     int hdr_peak_nits = 1000;
     // How the capture is scaled up to the window (glasir_scaling.lua).

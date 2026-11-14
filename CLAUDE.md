@@ -61,6 +61,30 @@
   skip_black_bars). Neither is exclusive full screen (`d3d11-exclusive-fs`
   is off). Check presentation
   changes with PresentMon (`MPV-SW-Capture\tools\presentmon`).
+- Downloaded programs are pinned (`src/app/components.h`): setup installs
+  the versions in `src/app/components.json`, built into Glasir.exe, each
+  checked against its SHA-256. A pinned download
+  that is gone (HTTP 404; zhongfly keeps mpv builds about a month) falls
+  back to the newest. `--setup --newest` takes the newest of everything;
+  `python tools/pin_components.py --engine DIR` writes components.json from
+  that folder's components.ini. `GLASIR_COMPONENTS=<file>` uses another
+  components.json without building. Test setup on a copy of the app folder
+  (e.g. `cmake --install build\vs --config Release --prefix build\x\Glasir`),
+  not on out\Glasir. Judge a new DLSS 5 part by RenoDX's last
+  `NR-VERDICT` in engine\ReShade.log (`state=ENGAGED`, its eval ratio), the
+  Feeder's `effects:` and `600 frames` lines in dlss5-feed.log and frame
+  generation's `real + generated fps` lines, on the card and with
+  `tools/screenshot_check.py --dlss5` (SDR and `--hdr`). Run each test twice:
+  ReShade compiles a changed shader once per picture size and SDR/HDR
+  (DLSS5-Feeder 2.0 with its built-in motion vectors: ~17 s, twice, and the first one
+  stops the picture), so a
+  first short run can end before DLSS 5 engages.
+- SDR or HDR (`video.mode = auto`, the default; `src/capture/signal_kind.h`):
+  told from the 10-bit capture's top luma and chroma, the picture restarted
+  when it changes. `GLASIR_SIGNAL_LOG=1` logs what it measures every 2 s
+  ("signal:" lines in glasir.log). Its limits come from measured signals
+  (the header lists them): change them only with new measurements from a
+  real console in both modes. The tools pass `video.mode` themselves.
 - Updates and bug reports (`src/app/update.cpp`, `bug_report.cpp`): the repo
   is public and releases are real (v0.1.0 first); publishing one is the
   owner's call. Test with `GLASIR_UPDATE_TEST_RELEASE=<release.json>` (GitHub's

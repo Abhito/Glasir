@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include "backdrop.h"
 #include "components.h"
 #include "devices.h"
+#include "files.h"
 #include "glasir_version.h"
 #include "gpu.h"
 #include "json.h"
@@ -130,7 +132,13 @@ int main() {
     {
         Settings s;
         std::wstring error;
-        expect(apply_override(s, L"video.mode=hdr", error) && s.hdr, "--set video.mode=hdr");
+        expect(s.hdr_auto && !s.hdr, "video.mode: automatic unless said");
+        expect(apply_override(s, L"video.mode=hdr", error) && s.hdr && !s.hdr_auto, "--set video.mode=hdr");
+        expect(apply_override(s, L"video.mode=auto", error) && s.hdr_auto && !s.hdr &&
+                   apply_override(s, L"video.auto_found=sdr", error) && !s.auto_found_hdr &&
+                   !apply_override(s, L"video.mode=dolby", error),
+               "--set video.mode=auto, and what it found last");
+        expect(apply_override(s, L"video.mode=hdr", error) && s.hdr && !s.hdr_auto, "back to video.mode=hdr");
         expect(apply_override(s, L"capture.fps = 120", error) && s.fps == 120, "--set with spaces");
         expect(apply_override(s, L"Capture.Device=My Card", error) && s.device == L"My Card",
                "--set keeps the value's case");
@@ -257,8 +265,10 @@ int main() {
         Settings s;
         expect(!dlss5_installed(engine), "DLSS 5 files missing: not installed");
         for (const wchar_t *f : {L"\\dlss5-feed.addon64", L"\\renodx-dlss5.addon64", L"\\nvngx_dlssnr.dll",
-                                 L"\\nvngx_dlss.dll", L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
+                                 L"\\nvngx_dlss.dll"})
             touch(f, "x");
+        // DLSS5-Feeder 2.0's shader: its own motion vectors are provider 5.
+        touch(L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx", "#elif DLSS5_MV_PROVIDER == 5\n");
         expect(dlss5_installed(engine), "DLSS 5 files there: installed");
         write_reshade_config(engine, s, true, true);
         std::string ini = read(L"\\ReShade.ini");
@@ -266,7 +276,8 @@ int main() {
                "effect path added in front, the user's kept");
         expect(ini.find("TextureSearchPaths=.\\reshade-shaders\\Textures\\**\r\n") != std::string::npos,
                "texture path replaces ReShade's bare default");
-        expect(ini.find("PreprocessorDefinitions=DLSS5_MV_PROVIDER=3") != std::string::npos, "Lumenite motion vectors");
+        expect(ini.find("PreprocessorDefinitions=DLSS5_MV_PROVIDER=5\r\n") != std::string::npos,
+               "motion vectors: the Feeder's own");
         expect(ini.find("TutorialProgress=1") != std::string::npos, "an existing ReShade value is not overwritten");
         expect(ini.find("NeuralUplift=1") != std::string::npos && ini.find("[GLASIR_FRAMEGEN]") != std::string::npos,
                "DLSS 5 and frame generation keys written");
@@ -275,8 +286,51 @@ int main() {
         write_reshade_config(engine, s, true, true);
         expect(read(L"\\ReShade.ini").find("NRScreenshotSource=1") != std::string::npos,
                "F5 screenshots: a source other than Auto is kept");
-        expect(read(L"\\ReShadePreset.ini").rfind("Techniques=Lumenite_Kernel@lumenite_Kernel.fx,DLSS5_Feed", 0) == 0,
-               "preset enables the DLSS 5 effects");
+        expect(read(L"\\ReShadePreset.ini").rfind("Techniques=DLSS5_Feed@DLSS5_Feed.fx\r\n", 0) == 0,
+               "preset enables the DLSS 5 effect, nothing else");
+
+        // An install from Glasir 0.1.3: LumeniteFX's vectors in ReShade.ini.
+        auto defines = [&] {
+            wchar_t v[256] = {};
+            GetPrivateProfileStringW(L"GENERAL", L"PreprocessorDefinitions", L"", v, 256,
+                                     (engine + L"\\ReShade.ini").c_str());
+            return std::wstring(v);
+        };
+        auto set_defines = [&](const wchar_t *v) {
+            WritePrivateProfileStringW(L"GENERAL", L"PreprocessorDefinitions", v, (engine + L"\\ReShade.ini").c_str());
+        };
+        set_defines(L"DLSS5_MV_PROVIDER=3,MY_DEFINE=1");
+        write_reshade_config(engine, s, true, true);
+        expect(defines() == L"DLSS5_MV_PROVIDER=5,MY_DEFINE=1",
+               "from LumeniteFX to the Feeder's own vectors once the Feeder has them; other defines kept");
+        // Updated Glasir, DLSS 5 not yet: Feeder 1.19 with LumeniteFX stays as it was.
+        CreateDirectoryW((engine + L"\\reshade-shaders\\Shaders\\LumeniteFX").c_str(), nullptr);
+        touch(L"\\reshade-shaders\\Shaders\\LumeniteFX\\lumenite_Kernel.fx", "x");
+        touch(L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx", "#elif DLSS5_MV_PROVIDER == 4\n");
+        write_reshade_config(engine, s, true, true);
+        expect(defines() == L"DLSS5_MV_PROVIDER=3,MY_DEFINE=1" &&
+                   read(L"\\ReShadePreset.ini").rfind("Techniques=Lumenite_Kernel@lumenite_Kernel.fx,DLSS5_Feed", 0) == 0,
+               "an older Feeder: LumeniteFX's vectors and technique until DLSS 5 is updated");
+        // A provider a user installed is theirs.
+        set_defines(L"DLSS5_MV_PROVIDER=2");
+        write_reshade_config(engine, s, true, true);
+        expect(defines() == L"DLSS5_MV_PROVIDER=2", "a provider the user chose (1, 2) is kept");
+        set_defines(L"DLSS5_MV_PROVIDER=15,,A=1");
+        write_reshade_config(engine, s, true, true);
+        expect(defines() == L"DLSS5_MV_PROVIDER=3,A=1", "=15 is not provider 1; empty items dropped");
+        std::wstring many = L"DLSS5_MV_PROVIDER=3";
+        for (int i = 0; i < 300; ++i) many += std::format(L",DEFINE_NUMBER_{}=1", i);
+        set_defines(many.c_str());
+        write_reshade_config(engine, s, true, true);
+        wchar_t whole[16384] = {};
+        GetPrivateProfileStringW(L"GENERAL", L"PreprocessorDefinitions", L"", whole, 16384,
+                                 (engine + L"\\ReShade.ini").c_str());
+        expect(std::wstring(whole).ends_with(L",DEFINE_NUMBER_299=1"), "a long list of defines is kept whole");
+        DeleteFileW((engine + L"\\reshade-shaders\\Shaders\\LumeniteFX\\lumenite_Kernel.fx").c_str());
+        RemoveDirectoryW((engine + L"\\reshade-shaders\\Shaders\\LumeniteFX").c_str());
+        set_defines(L"");
+        touch(L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx", "#elif DLSS5_MV_PROVIDER == 5\n");
+        write_reshade_config(engine, s, true, true);
         expect(read(L"\\dlss5-feed.cfg").empty(), "DLSS 5 on: the Feeder's file is left for the Feeder to write");
         touch(L"\\dlss5-feed.cfg", "enabled=1\r\nmode=2\r\n");
         touch(L"\\ReShadePreset.ini", "Techniques=X@x.fx\r\nTechniqueSorting=X@x.fx\r\n\r\n[x.fx]\r\nA=1\r\n");
@@ -509,6 +563,76 @@ int main() {
                "1280x720 window centred above the taskbar");
         expect(same(centre_window(RECT{616, -1317, 2536, -237}, 1920, 1080), 712, -1263, 2440, -291),
                "a window as large as the screen: 90 % of it, centred");
+    }
+    {
+        // The tested versions of the downloaded programs (components.json).
+        const std::string sha(64, 'a');
+        PinSet pins;
+        std::wstring error;
+        expect(read_pins(R"({"about":"text","mpv":{"version":"1","url":"https://x/y.7z","sha256":")" +
+                             std::string(64, 'A') + R"(","size":12}})",
+                         pins, error) &&
+                   pins.parts.size() == 1 && pins.find("mpv") && pins.find("mpv")->sha256 == sha &&
+                   pins.find("mpv")->size == 12 && !pins.find("reshade"),
+               "tested set: a part read, its SHA-256 in lower case, text members skipped");
+        expect(!read_pins(R"({"mpv":{"version":"1","url":"https://x/y.7z","sha256":"abc"}})", pins, error) &&
+                   !read_pins(R"({"mpv":{"version":"1","url":"http://x/y.7z","sha256":")" + sha + R"("}})", pins, error) &&
+                   !read_pins(R"({"mpv":{"url":"https://x/y.7z","sha256":")" + sha + R"("}})", pins, error) &&
+                   !read_pins("[]", pins, error) && pins.parts.empty(),
+               "tested set: a short SHA-256, http, no version or no object is refused");
+        const PinSet &tested = tested_components();
+        bool all = true;
+        for (const char *part : {"mpv", "reshade", "feeder", "renodx", "dlssnr", "dlss", "reshade_fxh"})
+            all = all && tested.find(part);
+        expect(all, "tested set: the built-in one names every part");
+
+        // What is installed against it (components.ini in a scratch folder).
+        wchar_t tmp[MAX_PATH];
+        GetTempPathW(MAX_PATH, tmp);
+        const std::wstring engine = std::wstring(tmp) + L"glasir_test_components";
+        CreateDirectoryW(engine.c_str(), nullptr);
+        const std::wstring ini = engine + L"\\components.ini";
+        DeleteFileW(ini.c_str());
+        auto set = [&](const wchar_t *section, const std::wstring &key, const std::wstring &value) {
+            WritePrivateProfileStringW(section, key.c_str(), value.c_str(), ini.c_str());
+        };
+        const Pin *mpv = tested.find("mpv");
+        expect(mpv && !component_as_tested(engine, Component::Mpv), "nothing recorded: not the tested mpv");
+        if (mpv) {
+            set(L"mpv", L"version", mpv->version);
+            set(L"mpv", L"sha256", widen(mpv->sha256));
+            set(L"mpv", L"source", mpv->url);
+            expect(component_as_tested(engine, Component::Mpv), "the tested mpv: version and SHA-256 match");
+            set(L"mpv", L"sha256", widen(sha));
+            expect(!component_as_tested(engine, Component::Mpv), "the tested version with another SHA-256: not it");
+            set(L"mpv", L"version", L"20990101-git-0000000000");
+            expect(!component_as_tested(engine, Component::Mpv), "a newer mpv: not the tested one");
+            set(L"mpv", L"instead_of", mpv->version);
+            expect(component_as_tested(engine, Component::Mpv),
+                   "the newest in place of a tested build no longer offered: nothing to update");
+        }
+        // As Glasir 0.1.3 recorded DLSS 5: versions only, two parts by date.
+        for (const char *part : {"feeder", "renodx", "dlssnr", "dlss"})
+            if (const Pin *pin = tested.find(part)) set(L"dlss5", widen(part), pin->version);
+        set(L"dlss5", L"lumenite", L"mainline 2026-11-05");
+        set(L"dlss5", L"reshade_fxh", L"crosire/reshade-shaders slim 2026-11-05");
+        expect(!component_as_tested(engine, Component::Dlss5), "DLSS 5 with parts taken from a branch's head: not tested");
+        for (const char *part : {"reshade_fxh"})
+            if (const Pin *pin = tested.find(part)) {
+                set(L"dlss5", widen(part), pin->version);
+                set(L"dlss5", widen(part) + L"_sha256", widen(pin->sha256));
+                set(L"dlss5", widen(part) + L"_source", pin->url);
+            }
+        expect(component_as_tested(engine, Component::Dlss5),
+               "DLSS 5: every part in its tested version (LumeniteFX, from before, does not count)");
+        bool hidden = true, shown = false;
+        for (const auto &line : installed_versions(engine)) {
+            hidden = hidden && line.find(L"https://") == std::wstring::npos && line.find(widen(sha)) == std::wstring::npos;
+            shown = shown || line.find(L"instead_of=") != std::wstring::npos;
+        }
+        expect(hidden && shown, "installed versions: no addresses or SHA-256s, the stand-in said");
+        DeleteFileW(ini.c_str());
+        RemoveDirectoryW(engine.c_str());
     }
     std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
     return g_failures ? 1 : 0;

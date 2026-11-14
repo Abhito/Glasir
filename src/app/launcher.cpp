@@ -88,6 +88,7 @@ struct Choice {
     std::wstring device;  // "" = automatic
     UINT32 width = 0, height = 0;
     double fps = 0;
+    bool hdr_auto = false;  // SDR or HDR as the signal turns out to be (hdr then says nothing)
     bool hdr = false;
     bool dlss5 = true;
     bool framegen = true;
@@ -372,6 +373,7 @@ struct Screen {
     bool dlss5_installed = false;
     bool dlss5_forced = false;  // glasir.ini: [dlss5] enabled = on (try on any GPU)
     std::string versions;  // "mpv 20261031  ·  ReShade 6.8.0  ·  DLSS 5 10.8.0", "" if none
+    bool other_versions = false;  // not the ones this Glasir was tested with: Update installs those
     const LauncherExtras *extras = nullptr;
     Release release;  // the newer Glasir, once the update check found one
     BugReport *bug = nullptr;
@@ -405,12 +407,24 @@ void draw(Screen &s) {
         dim("Looking for capture cards...");
     } else {
         ModeRequest request;
-        request.hdr = c.hdr;
+        request.hdr = c.hdr && !c.hdr_auto;
         request.max_auto_height = UINT32(GetSystemMetrics(SM_CYSCREEN));
         const CaptureDevice *automatic = choose_device(f->devices, L"", request);
+        if (!automatic && c.hdr_auto) {
+            // A card whose only modes are 10-bit (main.cpp does the same).
+            ModeRequest ten_bit = request;
+            ten_bit.hdr = true;
+            automatic = choose_device(f->devices, L"", ten_bit);
+        }
         const CaptureDevice *device = c.device.empty() ? automatic : nullptr;
         for (const auto &d : f->devices)
             if (!c.device.empty() && names_match(d.name, c.device)) device = &d;
+        // Automatic watches the signal in the card's 10-bit mode, if it has one.
+        bool ten_bit_modes = false;
+        if (device)
+            for (const auto &m : device->modes) ten_bit_modes = ten_bit_modes || (m.supported && m.format == PixelFormat::P010);
+        const bool ten_bit = c.hdr_auto ? ten_bit_modes : c.hdr;
+        request.hdr = ten_bit;
         bool directshow = false;
         for (const auto &n : f->directshow_only) directshow = directshow || (!c.device.empty() && names_match(n, c.device));
 
@@ -439,13 +453,20 @@ void draw(Screen &s) {
         if (f->devices.empty() && f->directshow_only.empty()) dim("No capture card found. Plug it in and start Glasir again.");
 
         row("Picture");
-        if (ImGui::RadioButton("SDR", !c.hdr)) c.hdr = false;
+        if (ImGui::RadioButton("Automatic", c.hdr_auto)) c.hdr_auto = true;
         ImGui::SameLine();
-        if (ImGui::RadioButton("HDR", c.hdr)) c.hdr = true;
-        dim(c.hdr ? "HDR needs HDR on the console. Only the card's HDR (10-bit) modes are listed."
-                  : "Modes marked HDR can also be played in HDR.");
+        if (ImGui::RadioButton("SDR", !c.hdr_auto && !c.hdr)) c.hdr_auto = c.hdr = false;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("HDR", !c.hdr_auto && c.hdr)) c.hdr_auto = false, c.hdr = true;
+        if (c.hdr_auto)
+            dim(!device || ten_bit_modes
+                    ? "SDR or HDR, as the console sends it: Glasir tells from the picture, in the card's 10-bit modes."
+                    : "This card has no 10-bit mode: SDR.");
+        else
+            dim(c.hdr ? "HDR needs HDR on the console. Only the card's HDR (10-bit) modes are listed."
+                      : "Modes marked HDR can also be played in HDR.");
 
-        const auto modes = modes_for(device, c.hdr);
+        const auto modes = modes_for(device, ten_bit);
         bool mode_ok = c.width == 0;
         for (const auto &m : modes)
             mode_ok = mode_ok || (m.width == c.width && m.height == c.height && std::abs(m.fps - c.fps) < 0.01);
@@ -459,13 +480,13 @@ void draw(Screen &s) {
         row("Mode");
         const std::string mode_label = c.width ? mode_text(c.width, c.height, c.fps) : auto_mode;
         if (ImGui::BeginCombo("##mode", mode_label.c_str())) {
-            const bool auto_hdr = !c.hdr && picked && has_hdr(device, picked->width, picked->height, picked->fps);
+            const bool auto_hdr = !ten_bit && picked && has_hdr(device, picked->width, picked->height, picked->fps);
             if (mode_item(auto_mode, c.width == 0, auto_hdr)) c.width = c.height = 0, c.fps = 0;
             int id = 0;
             for (const auto &m : modes) {
                 const bool on = m.width == c.width && m.height == c.height && std::abs(m.fps - c.fps) < 0.01;
                 ImGui::PushID(id++);
-                if (mode_item(mode_text(m.width, m.height, m.fps), on, !c.hdr && has_hdr(device, m.width, m.height, m.fps))) {
+                if (mode_item(mode_text(m.width, m.height, m.fps), on, !ten_bit && has_hdr(device, m.width, m.height, m.fps))) {
                     c.width = m.width;
                     c.height = m.height;
                     c.fps = m.fps;
@@ -474,7 +495,7 @@ void draw(Screen &s) {
             }
             ImGui::EndCombo();
         }
-        if (device && modes.empty()) dim(c.hdr ? "This card has no HDR mode Glasir can read." : "This card has no mode Glasir can read; mpv opens it through DirectShow.");
+        if (device && modes.empty()) dim(ten_bit ? "This card has no HDR mode Glasir can read." : "This card has no mode Glasir can read; mpv opens it through DirectShow.");
     }
 
     heading("ENHANCEMENTS");
@@ -565,9 +586,14 @@ void draw(Screen &s) {
     dim(s.versions.empty() ? "mpv and ReShade are downloaded when you press Play." : s.versions);
     if (!s.versions.empty()) {
         ImGui::SameLine();
-        if (ImGui::SmallButton("Update")) {
+        if (ImGui::SmallButton(s.other_versions ? "Update" : "Download again")) {
             s.action = LauncherAction::Setup;
             s.finished = true;
+        }
+        if (s.other_versions) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ui::kGold);
+            ImGui::TextWrapped("This Glasir was tested with other versions of these. Update installs them.");
+            ImGui::PopStyleColor();
         }
     }
     if (s.extras && s.extras->update && s.extras->update->state() == UpdateCheck::State::Available) {
@@ -617,7 +643,8 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool nr_gp
         v.push_back({L"capture", L"height", std::to_wstring(c.height)});
         v.push_back({L"capture", L"fps", num(c.fps)});
     }
-    if (c.hdr != o.hdr) v.push_back({L"video", L"mode", c.hdr ? L"hdr" : L"sdr"});
+    if (c.hdr_auto != o.hdr_auto || (!c.hdr_auto && c.hdr != o.hdr))
+        v.push_back({L"video", L"mode", c.hdr_auto ? L"auto" : c.hdr ? L"hdr" : L"sdr"});
     if (c.dlss5 != o.dlss5) v.push_back({L"dlss5", L"enabled", c.dlss5 ? (nr_gpu ? L"auto" : L"on") : L"off"});
     if (c.framegen != o.framegen) v.push_back({L"framegen", L"enabled", c.framegen ? L"1" : L"0"});
     if (c.fast != o.fast) v.push_back({L"framegen", L"quality", c.fast ? L"fast" : L"high"});
@@ -657,6 +684,7 @@ Choice from(const Settings &s) {
     c.width = s.width;
     c.height = s.height;
     c.fps = s.fps;
+    c.hdr_auto = s.hdr_auto;
     c.hdr = s.hdr;
     c.dlss5 = s.dlss5 != Settings::Dlss5::Off;
     c.framegen = s.framegen;
@@ -716,6 +744,8 @@ LauncherAction run_launcher(const std::wstring &settings_path, const std::wstrin
     screen.dlss5_installed = component_installed(engine_dir, Component::Dlss5);
     screen.dlss5_forced = settings.dlss5 == Settings::Dlss5::On;
     screen.versions = versions_line(engine_dir);
+    for (Component c : {Component::Mpv, Component::ReShade, Component::Dlss5})
+        screen.other_versions = screen.other_versions || (component_installed(engine_dir, c) && !component_as_tested(engine_dir, c));
     screen.extras = &extras;
     screen.bug = &bug;
     float style_scale = 0;

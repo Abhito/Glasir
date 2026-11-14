@@ -18,13 +18,14 @@ std::wstring fps_text(double fps) {
 }
 
 // The colour tags raw frames need: they carry none of their own. SDR from
-// consoles is BT.709; NV12 from cards is sited top-left, 4:2:2 left.
+// consoles is BT.709; 4:2:0 from cards (NV12, and P010 with an SDR signal in
+// it) is sited top-left, 4:2:2 left.
 std::wstring colour_filter(const MpvPlan &plan, const Settings &s) {
     if (s.hdr)
         return std::format(L"format=colormatrix=bt.2020-ncl:colorlevels=limited:primaries=bt.2020:gamma=pq:"
                            L"max-luma={0}:max_cll={0}",
                            s.hdr_peak_nits);
-    const wchar_t *siting = plan.layout.format == PixelFormat::NV12 ? L"uhd" : L"mpeg2/4/h264";
+    const wchar_t *siting = is_planar(plan.layout.format) ? L"uhd" : L"mpeg2/4/h264";
     return std::format(L"format=colormatrix=bt.709:colorlevels={}:primaries=bt.709:chroma-location={}",
                        s.sdr_full_range ? L"full" : L"limited", siting);
 }

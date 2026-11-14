@@ -19,6 +19,8 @@ struct HttpRequest {
     int timeout_ms = 0;  // per step (connect, send, receive); 0: 15 s to connect, 30 s for data
     // Called as data arrives: bytes so far, total (0 if the server did not say).
     std::function<void(uint64_t, uint64_t)> progress;
+    // Set to the server's answer (404: no longer there), 0 if it gave none.
+    int *status = nullptr;
 };
 
 // The body of a 200 answer; false with error set otherwise.

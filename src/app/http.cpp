@@ -37,6 +37,7 @@ std::wstring winhttp_error(DWORD e) {
 // Runs the request and passes the body to sink in pieces. sink returns false
 // to stop (a write failed).
 bool transfer(const HttpRequest &r, const std::function<bool(const char *, DWORD)> &sink, std::wstring &error) {
+    if (r.status) *r.status = 0;
     URL_COMPONENTS parts{};
     parts.dwStructSize = sizeof(parts);
     wchar_t host[256] = {}, path[4096] = {};
@@ -82,6 +83,7 @@ bool transfer(const HttpRequest &r, const std::function<bool(const char *, DWORD
     DWORD status = 0, size = sizeof(status);
     WinHttpQueryHeaders(request.h, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
                         &status, &size, WINHTTP_NO_HEADER_INDEX);
+    if (r.status) *r.status = int(status);
     if (status != 200) {
         error = status == 403 || status == 429
                     ? std::format(L"the server refused (HTTP {}); GitHub allows 60 requests an hour, try again later",

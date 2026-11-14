@@ -42,6 +42,9 @@ Keep / build:
   volume sidebar inside the new menu.
 - SDR and HDR from one launcher (switch in the menu / per-console presets;
   restarts the pipeline). Auto-detecting HDR from the picture is a later experiment.
+  *(done 2026-11-14: `video.mode = auto`, the default; src/capture/signal_kind.h.
+  Tested with one console and the Live Gamer Ultra 2.1 in both directions,
+  on one dark scene; other consoles, cards and bright scenes are not.)*
 - Dedup, frame generation x2 with VRR hold pacing, low-latency "send repeats"
   switch (frame gen off).
 - DLSS 5 with neural rendering on/off.
@@ -74,20 +77,22 @@ UI:
 
 Dropped: CRT / retro shaders, shapes, bezels, NSO crops, rotation, mirror,
 old FSR1/NVScaler shader presets of MSC, TyRaS's version check, recording
-(users record the window with OBS), FFplay audio mode, LumeniteFX extras
+(users record the window with OBS), FFplay audio mode, LumeniteFX (its Kernel
+gave DLSS5_Feed its motion vectors up to 0.1.3; DLSS5-Feeder 2.0 makes its own) and its extras
 beyond what DLSS5_Feed needs.
 
 ## Third-party components
 
 Nothing third-party that is restricted goes into the repo or our release zip.
-Glasir's setup (in Glasir.exe) fetches on the user's PC:
+Glasir's setup (in Glasir.exe) fetches on the user's PC, each in the version
+that Glasir was tested with (`src/app/components.json`, since 2026-11-14;
+before, the newest of each):
 
 | Component | Source |
 |---|---|
 | mpv (GPLv3 build) | zhongfly/mpv-winbuild releases |
 | ReShade (add-on build) | reshade.me |
 | DLSS5-Feeder (MIT) | jlrouzies-fr/DLSS5-Feeder releases |
-| LumeniteFX (motion for DLSS5_Feed; AGNYA licence) | umar-afzaal/LumeniteFX (ask the author before public release) |
 | RenoDX-DLSS5, nvngx_dlssnr.dll | RankFTW/rhi-repo releases (RHI's mirror) |
 | nvngx_dlss.dll | NVIDIA/DLSS releases |
 

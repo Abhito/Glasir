@@ -24,8 +24,9 @@ for Windows 11 · [How to install](#-installing)
 
 - **30 fps games, smooth at 60.** Motion-compensated frame generation
   (30 → 60, 60 → 120 fps) on any GPU: NVIDIA, AMD or Intel.
-- **HDR that looks right from the start.** SDR and HDR from the same app,
-  switched in the menu, with nothing to calibrate.
+- **HDR that looks right from the start.** Glasir tells from the picture
+  whether the console sends SDR or HDR and follows it, with nothing to
+  calibrate.
 - **DLSS 5 neural rendering** on NVIDIA RTX 30, 40 and 50 series GPUs.
 - **Sharper than the card sends it.** A 1080p capture scaled up to your
   screen by a neural network, not just stretched (see [Scaling](#scaling)).
@@ -94,12 +95,16 @@ To remove Glasir, delete its folder.
 - DLSS 5, on an NVIDIA RTX 30, 40 or 50 series GPU: DLSS5-Feeder, RenoDX-DLSS5
   and NVIDIA's neural rendering from
   [RHI's mirror](https://github.com/RankFTW/rhi-repo),
-  [NVIDIA DLSS](https://github.com/NVIDIA/DLSS), LumeniteFX
+  [NVIDIA DLSS](https://github.com/NVIDIA/DLSS)
 
-Downloads are checked against their published SHA-256 hashes, and NVIDIA's
-DLL against NVIDIA's signature. The **Update** button in Glasir's window
-(or `Glasir.exe --setup`) downloads their newest versions later;
-`engine\components.ini` says which are installed.
+Each Glasir downloads the versions it was tested with, so a new release of
+one of them does not reach you before a Glasir tested with it does. Every
+download is checked against the SHA-256 recorded for that version, and
+NVIDIA's DLL against NVIDIA's signature as well. If a tested version is no
+longer offered (mpv's builds are kept about a month), the newest takes its
+place. `engine\components.ini` says what is installed. After a Glasir
+update, its window says when it was tested with other versions; **Update**
+there (or `Glasir.exe --setup`) installs them.
 
 </details>
 
@@ -126,8 +131,8 @@ command line.
 ## 🎮 Using it
 
 `Glasir.exe` opens its window first: pick the capture card and its mode,
-SDR or HDR, DLSS 5, frame generation, the sound and the window mode, then
-press **Play**.
+DLSS 5, frame generation, the sound and the window mode, then press
+**Play**.
 
 - Untick "Show this window when Glasir starts" to play at once. Hold
   **Shift** while starting Glasir to see the window again, or start it with
@@ -138,11 +143,29 @@ press **Play**.
 - The card's own audio input is found automatically. DLSS 5 turns itself on
   with an NVIDIA RTX 30, 40 or 50 series GPU (`[dlss5] enabled = auto`).
 
+### SDR and HDR
+
+**Picture** in Glasir's window, and in the menu, has three choices:
+
+- **Automatic** (the default): Glasir captures in the card's 10-bit mode and
+  tells from the picture whether the console sends SDR or HDR. When that
+  changes (HDR switched on in the console, a game that switches it), the
+  picture starts again in the other mode: about a second after an SDR
+  picture shows up, about five after an HDR one. It starts the way it found
+  the signal last time. A card without a 10-bit mode plays SDR.
+- **SDR** or **HDR**: you say it. SDR also offers the card's 8-bit modes,
+  which are often larger or faster (4K at 60 fps where 10-bit stops at
+  1440p). Use these if Automatic gets a game wrong: a console set to a peak
+  of 5000 nits or more can read as SDR in very bright scenes, and a grey,
+  dim SDR scene without any white can read as HDR.
+
+HDR needs HDR on in Windows (Settings, Display) too.
+
 ### Keys
 
 | Key | What it does |
 |---|---|
-| `Tab` | The menu: DLSS 5, frame generation, scaling, sound, full screen, SDR/HDR (`Esc` or `Tab` closes it) |
+| `Tab` | The menu: DLSS 5, frame generation, scaling, sound, full screen, SDR / HDR / automatic (`Esc` or `Tab` closes it) |
 | `f`, double-click | Full screen on / off |
 | `Up` / `Down`, mouse wheel | Volume |
 | `m` | Mute |
@@ -264,6 +287,8 @@ out\Glasir\Glasir.exe --list                 # the capture cards and their modes
 ```
 
 `--setup --no-dialogs --components mpv,reshade,dlss5` picks what to download.
+Setup installs the versions in `src/app/components.json` (built into
+`Glasir.exe`); `--setup --newest` takes the newest of each instead.
 
 Testing without a capture card (needs ffmpeg and Python):
 
@@ -275,6 +300,12 @@ python tools\probe.py --set video.mode=hdr   # with a real card, in a small wind
 
 <details>
 <summary>Making a release</summary>
+
+To move to newer versions of mpv, ReShade or DLSS 5's parts first: run
+`Glasir.exe --setup --newest` on a copy of the app folder, play with them
+(SDR and HDR, DLSS 5, frame generation), then
+`python tools\pin_components.py --engine COPY\engine` writes them into
+`src/app/components.json`.
 
 `build.cmd package` makes `out\Glasir-x.y.z.zip` (the version is set in the
 root `CMakeLists.txt`). Publish it as an asset of a GitHub release tagged

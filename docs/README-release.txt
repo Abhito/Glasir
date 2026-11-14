@@ -10,9 +10,11 @@ GETTING STARTED
 3. Start Glasir.exe, pick your card and what you want in its window, and
    press Play. The first time, it asks to download the programs it runs on
    (mpv and ReShade, plus DLSS 5 on an NVIDIA RTX 30, 40 or 50 series GPU).
-   They come straight from their authors' sites; THIRD-PARTY-NOTICES.md lists
-   them and their licences.
-4. While playing, Tab opens the menu.
+   They come straight from their authors' sites, in the versions this
+   Glasir was tested with; THIRD-PARTY-NOTICES.md lists them and their
+   licences.
+4. While playing, Tab opens the menu. SDR or HDR is found by itself
+   ("Picture: Automatic"); the menu and Glasir's window can also say which.
 
 Settings are in glasir.ini (written on the first start, every setting
 explained). Volume, boost and audio delay you change while playing are kept
@@ -21,7 +23,8 @@ there, and so is what you change in the menu (Tab).
 KEYS
 
   Tab                      the menu (Esc or Tab closes it): DLSS 5, frame
-                           generation, scaling, sound, full screen, SDR/HDR
+                           generation, scaling, sound, full screen, SDR,
+                           HDR or automatic
   double-click, f          full screen
   Up / Down, mouse wheel   volume
   m                        mute
@@ -46,7 +49,9 @@ When a newer Glasir is out, its window says so under Play: "Update Glasir"
 installs it (your settings stay). [update] check = 0 in glasir.ini stops
 Glasir from asking GitHub.
 
-  Update (in the window)   downloads the newest mpv, ReShade and DLSS 5
+  Update (in the window)   downloads mpv, ReShade and DLSS 5 in the versions
+                           this Glasir was tested with (it says when yours
+                           are others)
   Glasir.exe --setup       the same, from a command line
   Glasir.exe --update      installs the newest Glasir
 

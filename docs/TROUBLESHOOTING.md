@@ -56,11 +56,22 @@ generation falls short of double, and the option is better off.
 ## HDR
 
 - HDR needs HDR on the console, HDR on in Windows (Settings, Display) and one
-  of the card's 10-bit modes. Glasir's window lists the card's HDR modes when
-  HDR is chosen, and marks them with "HDR" in SDR.
+  of the card's 10-bit modes. Glasir's window lists the card's 10-bit modes
+  when Automatic or HDR is chosen, and marks them with "HDR" in SDR.
 - Cards often offer HDR only at some sizes and rates; the Live Gamer Ultra
-  2.1, for example, has 4K HDR only at 30 fps but 1440p HDR at 60.
-- Switch between SDR and HDR in the menu; the picture starts again.
+  2.1, for example, has 4K HDR only at 30 fps but 1440p HDR at 60. Automatic
+  uses those modes too: for an SDR console at 4K 60, choose SDR.
+- With **Picture: Automatic** Glasir tells SDR from HDR by the picture and
+  starts it again when the console changes (about a second for SDR, five for
+  HDR; a black screen says nothing, so it waits for a picture). The menu's
+  top line says what it is showing, e.g. `HDR (auto)`.
+- **The colours are wrong with Automatic** (washed out and dim: HDR shown as
+  SDR; glaring: SDR shown as HDR): choose SDR or HDR yourself, in the menu or
+  Glasir's window. It can happen with a console whose HDR peak is set to
+  5000 nits or more (very bright scenes then read as SDR), and with a grey,
+  dim SDR game that shows no white for five seconds (read as HDR).
+  `logs\glasir.log` has a "signal:" line whenever what it sees changes; a
+  bug report (F9) with it helps.
 
 ## The picture is soft or scaled
 
@@ -93,6 +104,13 @@ Glasir finds and their modes.
 
 DLSS 5 needs an NVIDIA RTX 30, 40 or 50 series GPU and its download: the **Update**
 button in Glasir's window, or `Glasir.exe --setup`.
+
+The first time Glasir plays after DLSS 5 is installed or updated, the
+picture can stand still for about 20 seconds, and DLSS 5 shows up after
+about 40: ReShade compiles DLSS 5's shader (with its motion estimator) and
+keeps the result. It does so once for each picture size and for SDR and
+HDR, so the first switch to the other one, or to another window size, waits
+the same way once. Later starts are quick again.
 
 On RTX 30 and 40 series GPUs DLSS 5 takes more GPU time than on an RTX 50
 (about 1.5 times as much on an RTX 4070 SUPER as on an RTX 5070 Ti). If the

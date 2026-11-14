@@ -90,13 +90,13 @@ HRESULT CALLBACK progress_events(HWND hwnd, UINT note, WPARAM wparam, LPARAM, LO
 std::optional<std::vector<Component>> ask_setup(const SetupChoice &choice) {
     const std::wstring notices = L"<a href=\"" + choice.notices_file + L"\">THIRD-PARTY-NOTICES.md</a>";
     const std::wstring content =
-        L"Glasir runs on programs made by others. They are downloaded from where their authors publish them, "
-        L"and each keeps its own licence (" + notices + L"):\n\n"
+        L"Glasir runs on programs made by others. They are downloaded from where their authors publish them, in "
+        L"the versions this Glasir was tested with, and each keeps its own licence (" + notices + L"):\n\n"
         L"\x2022 mpv, the video player: github.com/zhongfly/mpv-winbuild (about 35 MB)\n"
         L"\x2022 ReShade with add-on support, for frame generation: reshade.me (about 5 MB)";
     const std::wstring footer =
         L"DLSS 5 is DLSS5-Feeder, RenoDX-DLSS5 and NVIDIA's DLSS neural rendering (from RHI's mirror, "
-        L"github.com/RankFTW/rhi-repo), NVIDIA DLSS (github.com/NVIDIA/DLSS) and LumeniteFX.";
+        L"github.com/RankFTW/rhi-repo) and NVIDIA DLSS (github.com/NVIDIA/DLSS).";
     const TASKDIALOG_BUTTON buttons[] = {{kDownload, L"Download"}};
 
     TASKDIALOGCONFIG c{};
@@ -154,7 +154,7 @@ bool run_with_progress(const wchar_t *title, const ProgressJob &job, bool dialog
     return run.ok;
 }
 
-bool run_setup(const std::wstring &engine_dir, const std::vector<Component> &which, bool dialogs,
+bool run_setup(const std::wstring &engine_dir, const std::vector<Component> &which, Versions versions, bool dialogs,
                std::wstring &error) {
     std::wstring names;
     for (Component c : which) names += (names.empty() ? L"" : L", ") + std::wstring(component_name(c));
@@ -162,7 +162,7 @@ bool run_setup(const std::wstring &engine_dir, const std::vector<Component> &whi
     const bool ok = run_with_progress(
         L"Glasir setup",
         [&](SetupProgress &progress, const std::atomic<bool> &cancel, std::wstring &e) {
-            return install_components(engine_dir, which, progress, cancel, e);
+            return install_components(engine_dir, which, versions, progress, cancel, e);
         },
         dialogs, error);
     if (ok)

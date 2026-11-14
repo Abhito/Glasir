@@ -234,6 +234,9 @@ bool save_bug_report(const BugReportInput &in, std::wstring &zip, std::wstring &
     system += system_summary();
     system += L"\nInstalled:\n";
     for (const auto &line : installed_versions(engine)) system += L"  " + line + L"\n";
+    for (Component c : {Component::Mpv, Component::ReShade, Component::Dlss5})
+        if (component_installed(engine, c) && !component_as_tested(engine, c))
+            system += std::wstring(L"  ") + component_name(c) + L" is not the version this Glasir was tested with\n";
     if (!in.extra.empty()) system += L"\n" + in.extra;
     system += L"\nFiles:\n" + listed;
     system += frames_name.empty() ? L"  (no frames: F9 while playing adds them when frame generation is on)\n"

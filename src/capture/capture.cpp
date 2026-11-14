@@ -30,19 +30,54 @@ void pack_rows(const BYTE *src, LONG pitch, const FrameLayout &layout, std::vect
 // Hands a frame to mpv's slot, minus repeats when deduplicating - unless the
 // add-on asks for them: then a repeat goes out as one (a keepalive does the
 // same), which never displaces a new frame mpv has not taken yet.
-void deliver_frame(FrameSlot &slot, RepeatFilter *repeats, const BYTE *data, size_t bytes) {
+void deliver_frame(FrameSlot &slot, const FrameSinks &sinks, const BYTE *data, size_t bytes) {
+    RepeatFilter *repeats = sinks.repeats;
     if (!repeats) {
+        if (sinks.signal) sinks.signal->frame(data);
         slot.publish(data, bytes, true);
         return;
     }
     const bool all = slot.repeats_wanted();
-    if (repeats->take(data))
+    if (repeats->take(data)) {
+        // New pictures, and a still one now and then (the keepalive).
+        if (sinks.signal) sinks.signal->frame(data);
         slot.publish(data, bytes, !repeats->keepalive());
-    else if (all)
+    } else if (all) {
         slot.publish(data, bytes, false);
+    }
 }
 
-void raw_loop(HANDLE in, const FrameLayout &layout, FrameSlot &slot, RepeatFilter *repeats,
+SignalMonitor::SignalMonitor(Signal shown, UINT32 width, UINT32 height)
+    : found(shown), watch_(shown), width_(width), height_(height) {
+    wchar_t value[4] = {};
+    verbose_ = GetEnvironmentVariableW(L"GLASIR_SIGNAL_LOG", value, 4) > 0 && value[0] == L'1';
+}
+
+void SignalMonitor::frame(const BYTE *data) {
+    const ULONGLONG now = GetTickCount64();
+    if (now - measured_ms_ < 30) return;  // some thirty frames a second are plenty
+    measured_ms_ = now;
+    if (watch_.add(measure_signal(data, width_, height_), now)) {
+        log(L"signal: it is {} now", signal_name(watch_.found()));
+        found = watch_.found();
+    }
+    if (!window_ms_) window_ms_ = now;
+    if (now - window_ms_ < 2000) return;
+    window_ms_ = now;
+    const auto counts = watch_.take_counts();
+    const UINT32 sdr = counts[size_t(Signal::Sdr)], hdr = counts[size_t(Signal::Hdr)];
+    const Signal says = sdr > hdr ? Signal::Sdr : hdr > sdr ? Signal::Hdr : Signal::Unknown;
+    if (!verbose_ && logged_once_ && says == logged_ && now - logged_ms_ < 60000) return;
+    logged_once_ = true;
+    logged_ = says;
+    logged_ms_ = now;
+    const SignalStats &s = watch_.last();
+    log(L"signal: shown as {}; the last 2 s' frames say HDR {}, SDR {}, nothing {} (last frame: luma mean {:.0f}, "
+        L"top {}; colour top {})",
+        signal_name(watch_.found()), hdr, sdr, counts[size_t(Signal::Unknown)], s.mean, s.luma_top, s.colour_top);
+}
+
+void raw_loop(HANDLE in, const FrameLayout &layout, FrameSlot &slot, const FrameSinks &sinks,
               std::atomic<UINT64> &frames, std::atomic<HRESULT> &status) {
     status = S_OK;
     const size_t frame_bytes = layout.bytes();
@@ -60,12 +95,12 @@ void raw_loop(HANDLE in, const FrameLayout &layout, FrameSlot &slot, RepeatFilte
             }
             got += n;
         }
-        deliver_frame(slot, repeats, frame.data(), frame_bytes);
+        deliver_frame(slot, sinks, frame.data(), frame_bytes);
         ++frames;
     }
 }
 
-void capture_loop(IMFSourceReader *reader, const FrameLayout &layout, FrameSlot &slot, RepeatFilter *repeats,
+void capture_loop(IMFSourceReader *reader, const FrameLayout &layout, FrameSlot &slot, const FrameSinks &sinks,
                   std::atomic<UINT64> &frames, std::atomic<HRESULT> &status) {
     status = S_OK;
     const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -111,7 +146,7 @@ void capture_loop(IMFSourceReader *reader, const FrameLayout &layout, FrameSlot 
         if (SUCCEEDED(buffer.As(&buffer2d)) && SUCCEEDED(buffer2d->Lock2D(&scan0, &pitch))) {
             bool ok = true;
             if (pitch == packed_pitch) {
-                deliver_frame(slot, repeats, scan0, frame_bytes);
+                deliver_frame(slot, sinks, scan0, frame_bytes);
                 ++frames;
             } else if (pitch > packed_pitch) {
                 if (!logged_pitch) {
@@ -119,7 +154,7 @@ void capture_loop(IMFSourceReader *reader, const FrameLayout &layout, FrameSlot 
                     logged_pitch = true;
                 }
                 pack_rows(scan0, pitch, layout, packed);
-                deliver_frame(slot, repeats, packed.data(), frame_bytes);
+                deliver_frame(slot, sinks, packed.data(), frame_bytes);
                 ++frames;
             } else {
                 // Negative (bottom-up) or narrower than the picture.
@@ -136,7 +171,7 @@ void capture_loop(IMFSourceReader *reader, const FrameLayout &layout, FrameSlot 
         if (FAILED(buffer->Lock(&data, nullptr, &len))) continue;
         const bool whole = len >= frame_bytes;
         if (whole) {
-            deliver_frame(slot, repeats, data, frame_bytes);
+            deliver_frame(slot, sinks, data, frame_bytes);
             ++frames;
         }
         buffer->Unlock();
