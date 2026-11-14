@@ -21,28 +21,55 @@ bool file_exists(const std::wstring &path) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-std::string sha256_file(const std::wstring &path) {
-    BCRYPT_ALG_HANDLE alg = nullptr;
-    BCRYPT_HASH_HANDLE hash = nullptr;
-    std::string hex;
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) return hex;
-    if (BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
+namespace {
+
+class Sha256 {
+public:
+    Sha256() {
+        ok_ = BCryptOpenAlgorithmProvider(&alg_, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
+              BCryptCreateHash(alg_, &hash_, nullptr, 0, nullptr, 0, 0) == 0;
+    }
+    Sha256(const Sha256 &) = delete;
+    Sha256 &operator=(const Sha256 &) = delete;
+    ~Sha256() {
+        if (hash_) BCryptDestroyHash(hash_);
+        if (alg_) BCryptCloseAlgorithmProvider(alg_, 0);
+    }
+    void add(const void *data, size_t bytes) {
+        ok_ = ok_ && BCryptHashData(hash_, static_cast<PUCHAR>(const_cast<void *>(data)), ULONG(bytes), 0) == 0;
+    }
+    // The file's bytes; false (and no digest) if it cannot be read to its end.
+    bool add_file(const std::wstring &path) {
         std::ifstream in(path, std::ios::binary);
         std::vector<char> buffer(1 << 20);
-        bool ok = bool(in);
-        while (ok && in) {
+        ok_ = ok_ && bool(in);
+        while (ok_ && in) {
             in.read(buffer.data(), std::streamsize(buffer.size()));
-            if (in.gcount() > 0)
-                ok = BCryptHashData(hash, reinterpret_cast<PUCHAR>(buffer.data()), ULONG(in.gcount()), 0) == 0;
+            if (in.gcount() > 0) add(buffer.data(), size_t(in.gcount()));
         }
-        UCHAR digest[32];
-        if (ok && in.eof() && BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0)
-            for (UCHAR b : digest) hex += std::format("{:02x}", b);
-        BCryptDestroyHash(hash);
+        return ok_ = ok_ && in.eof();
     }
-    BCryptCloseAlgorithmProvider(alg, 0);
-    return hex;
+    std::string hex() {
+        std::string out;
+        UCHAR digest[32];
+        if (ok_ && BCryptFinishHash(hash_, digest, sizeof(digest), 0) == 0)
+            for (UCHAR b : digest) out += std::format("{:02x}", b);
+        return out;
+    }
+
+private:
+    BCRYPT_ALG_HANDLE alg_ = nullptr;
+    BCRYPT_HASH_HANDLE hash_ = nullptr;
+    bool ok_ = false;
+};
+
+}  // namespace
+
+std::string sha256_file(const std::wstring &path) {
+    Sha256 sha;
+    return sha.add_file(path) ? sha.hex() : std::string();
 }
+
 
 bool signed_by(const std::wstring &path, const std::wstring &signer, std::wstring &who) {
     WINTRUST_FILE_INFO file{};

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-// Checks dedup (RepeatFilter), the frame slot's drop counting, and repeats
-// sent while frame generation is off, on synthetic P010, NV12 and YUY2 frames.
+// Checks dedup (RepeatFilter), the frame slot's drop counting, repeats sent
+// while frame generation is off, and telling SDR from HDR (signal_kind.h), on
+// synthetic P010, NV12 and YUY2 frames.
 #include <windows.h>
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include "capture.h"
 #include "frame_slot.h"
 #include "repeat_filter.h"
+#include "signal_kind.h"
 
 using namespace glasir;
 
@@ -126,28 +128,29 @@ int main() {
         FrameSlot slot(a.size());
         slot.set_link(&link);
         RepeatFilter f(PixelFormat::P010, W, H, 2, 100000);
+        const FrameSinks sinks{&f};
         UINT64 published = 0, dropped = 0;
-        deliver_frame(slot, &f, a.data(), a.size());
+        deliver_frame(slot, sinks, a.data(), a.size());
         slot.take(0);
-        deliver_frame(slot, &f, a.data(), a.size());
+        deliver_frame(slot, sinks, a.data(), a.size());
         expect(slot.take(0) != nullptr, false, "send repeats off: a repeat is not sent");
         link.send_repeats = 1;
-        deliver_frame(slot, &f, a.data(), a.size());
+        deliver_frame(slot, sinks, a.data(), a.size());
         expect(slot.take(0) != nullptr, true, "send repeats on: a repeat is sent");
         slot.counts(published, dropped);
         expect(published == 1 && link.published == 1, true, "send repeats on: the repeat is not stamped as new");
-        deliver_frame(slot, &f, b.data(), b.size());
-        deliver_frame(slot, &f, b.data(), b.size());
+        deliver_frame(slot, sinks, b.data(), b.size());
+        deliver_frame(slot, sinks, b.data(), b.size());
         slot.counts(published, dropped);
         expect(published == 2 && dropped == 0, true, "send repeats on: a repeat does not displace a waiting new frame");
         slot.take(0);
-        deliver_frame(slot, &f, b.data(), b.size());
-        deliver_frame(slot, &f, a.data(), a.size());
+        deliver_frame(slot, sinks, b.data(), b.size());
+        deliver_frame(slot, sinks, a.data(), a.size());
         slot.counts(published, dropped);
         expect(published == 3 && dropped == 0, true, "send repeats on: a new frame replacing a waiting repeat is no drop");
         link.send_repeats = 0;
         slot.take(0);
-        deliver_frame(slot, &f, a.data(), a.size());
+        deliver_frame(slot, sinks, a.data(), a.size());
         expect(slot.take(0) != nullptr, false, "send repeats off again: repeats are dropped again");
     }
     {
@@ -287,6 +290,69 @@ int main() {
         }
         expect(luma10(PixelFormat::UYVY, uyvy.data(), 5) == luma10(PixelFormat::YUY2, a.data(), 5), true,
                "uyvy: luma read from the odd bytes");
+    }
+    {
+        // SDR or HDR, from a 10-bit frame (signal_kind.h). Grey chroma to start with.
+        auto frame = [](UINT16 luma) {
+            auto f = make_frame(luma);
+            auto *c = reinterpret_cast<UINT16 *>(f.data()) + size_t(W) * H;
+            for (size_t i = 0; i < size_t(W) * H / 2; ++i) c[i] = static_cast<UINT16>((512 + (i % 5) * 8) << 6);
+            return f;
+        };
+        // A patch of 1 % of the picture: luma, or both chroma channels.
+        auto patch = [](std::vector<BYTE> &f, bool chroma, UINT16 value) {
+            auto *p = reinterpret_cast<UINT16 *>(f.data()) + (chroma ? size_t(W) * H : 0);
+            const UINT32 rows = chroma ? H / 20 : H / 10;
+            for (UINT32 y = 0; y < rows; ++y)
+                for (UINT32 x = 0; x < W / 10; ++x) p[size_t(y) * W + x] = static_cast<UINT16>(value << 6);
+        };
+        auto says = [](const std::vector<BYTE> &f) { return frame_says(measure_signal(f.data(), W, H)); };
+        auto hdr = frame(200);  // as a console's HDR looked: luma top near 570, colour top near 60
+        patch(hdr, false, 572);
+        const SignalStats s = measure_signal(hdr.data(), W, H);
+        expect(s.luma_top >= 568 && s.luma_top <= 572 && s.colour_top >= 28 && s.colour_top <= 32 && s.mean > 200 &&
+                   s.mean < 210,
+               true, "signal: the top 0.1 % of luma and colour, and the mean");
+        expect(says(hdr) == Signal::Hdr, true, "signal: lit, no white, weak colour: HDR");
+        auto white = frame(300);
+        patch(white, false, 936);
+        expect(says(white) == Signal::Sdr, true, "signal: white near the top of the range: SDR");
+        auto colour = frame(130);  // a dark SDR scene: no white, strong colour
+        patch(colour, false, 750);
+        patch(colour, true, 512 + 290);
+        expect(says(colour) == Signal::Sdr, true, "signal: a dark scene with strong colour: SDR");
+        auto blue = frame(130);
+        patch(blue, true, 512 - 290);
+        expect(says(blue) == Signal::Sdr, true, "signal: colour below grey counts the same");
+        expect(says(frame(100)) == Signal::Unknown, true, "signal: a nearly black frame says nothing");
+        auto between = frame(300);
+        patch(between, false, 840);
+        expect(says(between) == Signal::Unknown, true, "signal: luma between HDR's and SDR's says nothing");
+        auto tinted = frame(300);
+        patch(tinted, true, 512 + 224);
+        expect(says(tinted) == Signal::Unknown, true, "signal: colour between HDR's and SDR's says nothing");
+
+        // Believed only after a while without the other kind.
+        const SignalStats is_hdr = measure_signal(hdr.data(), W, H), is_sdr = measure_signal(white.data(), W, H),
+                          unsure = measure_signal(between.data(), W, H);
+        SignalWatch watch(Signal::Hdr);
+        ULONGLONG t = 1000;
+        bool changed = false;
+        for (int i = 0; i < 29 && !changed; ++i, t += 33) changed = watch.add(is_sdr, t);
+        expect(!changed && watch.found() == Signal::Hdr, true, "watch: under a second of SDR frames is not believed");
+        watch.add(is_hdr, t);  // one frame as shown: the wait starts again
+        for (int i = 0; i < 29 && !changed; ++i, t += 33) changed = watch.add(is_sdr, t += 0);
+        expect(!changed, true, "watch: an HDR frame in between starts the wait again");
+        for (int i = 0; i < 5 && !changed; ++i, t += 33) changed = watch.add(i % 2 ? unsure : is_sdr, t);
+        expect(changed && watch.found() == Signal::Sdr, true, "watch: SDR after a second; frames that say nothing do not reset it");
+        changed = false;
+        int frames = 0;
+        for (; frames < 400 && !changed; ++frames, t += 33) changed = watch.add(is_hdr, t);
+        expect(changed && watch.found() == Signal::Hdr && frames > 150 && frames < 160, true,
+               "watch: HDR is believed after five seconds");
+        SignalWatch slow(Signal::Hdr);
+        expect(!slow.add(is_sdr, 0) && !slow.add(is_sdr, 5000) && !slow.add(is_sdr, 10000), true,
+               "watch: three frames are too few, however far apart");
     }
     std::printf(g_failures ? "\n%d FAILED\n" : "\nall passed\n", g_failures);
     return g_failures ? 1 : 0;

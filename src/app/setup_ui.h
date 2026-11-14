@@ -28,7 +28,7 @@ bool run_with_progress(const wchar_t *title, const ProgressJob &job, bool dialog
 
 // Downloads and installs with a progress window (dialogs) or only the log.
 // False with error set if it failed or was cancelled ("cancelled").
-bool run_setup(const std::wstring &engine_dir, const std::vector<Component> &which, bool dialogs,
+bool run_setup(const std::wstring &engine_dir, const std::vector<Component> &which, Versions versions, bool dialogs,
                std::wstring &error);
 
 }  // namespace glasir

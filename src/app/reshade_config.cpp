@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -36,14 +37,31 @@ void put_default(const std::wstring &ini, const wchar_t *section, const wchar_t 
     if (!has_key(ini, section, key)) put(ini, section, key, value);
 }
 
+// A value, however long (ReShade's lists can be).
+std::wstring get(const std::wstring &ini, const wchar_t *section, const wchar_t *key) {
+    std::vector<wchar_t> value(32768);
+    GetPrivateProfileStringW(section, key, L"", value.data(), DWORD(value.size()), ini.c_str());
+    return value.data();
+}
+
+// The items of a comma-separated list value, empty ones left out.
+std::vector<std::wstring> list_items(const std::wstring &list) {
+    std::vector<std::wstring> items;
+    for (size_t at = 0; at <= list.size();) {
+        size_t comma = list.find(L',', at);
+        if (comma == std::wstring::npos) comma = list.size();
+        if (comma > at) items.push_back(list.substr(at, comma - at));
+        at = comma + 1;
+    }
+    return items;
+}
+
 // Makes sure a comma-separated list value has an entry with needle in it:
 // if not, entry goes first and what was there (other than ReShade's bare
 // default ".\") stays after it.
 void put_in_list(const std::wstring &ini, const wchar_t *section, const wchar_t *key, const std::wstring &needle,
                  const std::wstring &entry) {
-    wchar_t value[2048] = {};
-    GetPrivateProfileStringW(section, key, L"", value, 2048, ini.c_str());
-    const std::wstring current = value;
+    const std::wstring current = get(ini, section, key);
     if (current.find(needle) != std::wstring::npos) return;
     put(ini, section, key, current.empty() || current == L".\\" ? entry : entry + L"," + current);
 }
@@ -77,7 +95,31 @@ void put_plain(const std::wstring &path, const std::string &key, const std::stri
     if (!out) log(L"could not write {}", path);
 }
 
-constexpr char kDlss5Techniques[] = "Lumenite_Kernel@lumenite_Kernel.fx,DLSS5_Feed@DLSS5_Feed.fx";
+// Where DLSS5_Feed.fx gets its motion vectors (DLSS5_MV_PROVIDER). 5: its own
+// estimator, from DLSS5-Feeder 2.0 on. 3: LumeniteFX's Kernel, which Glasir
+// installed with older Feeders (up to 0.1.3); such an install keeps it until
+// setup brings it up to date. 1 and 2 are providers a user installed: kept.
+int motion_vectors(const std::wstring &engine_dir, const std::wstring &ini) {
+    for (const std::wstring &item : list_items(get(ini, L"GENERAL", L"PreprocessorDefinitions"))) {
+        if (item == L"DLSS5_MV_PROVIDER=1") return 1;
+        if (item == L"DLSS5_MV_PROVIDER=2") return 2;
+    }
+    std::ifstream in(engine_dir + L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx", std::ios::binary);
+    const std::string shader((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (shader.find("DLSS5_MV_PROVIDER == 5") != std::string::npos) return 5;
+    if (exists(engine_dir + L"\\reshade-shaders\\Shaders\\LumeniteFX\\lumenite_Kernel.fx")) return 3;
+    log(L"DLSS5_Feed.fx has no motion vectors of its own and LumeniteFX is not installed: update DLSS 5 "
+        L"(\"Glasir.exe --setup\")");
+    return 5;
+}
+
+// Sets DLSS5_MV_PROVIDER=value in the comma-separated list, keeping the rest.
+void put_provider(const std::wstring &ini, int value) {
+    std::wstring out = std::format(L"DLSS5_MV_PROVIDER={}", value);
+    for (const std::wstring &item : list_items(get(ini, L"GENERAL", L"PreprocessorDefinitions")))
+        if (item.rfind(L"DLSS5_MV_PROVIDER=", 0) != 0) out += L"," + item;
+    put(ini, L"GENERAL", L"PreprocessorDefinitions", out);
+}
 
 }  // namespace
 
@@ -103,11 +145,14 @@ void write_reshade_config(const std::wstring &engine_dir, const Settings &s, boo
     if (!dlss5_installed(engine_dir)) return;
     // DLSS 5: DLSS5_Feed.fx hands the picture to the DLSS5-Feeder add-on,
     // which runs DLSS on it; RenoDX-DLSS5 turns that into the neural
-    // rendering pass. LumeniteFX's Kernel gives the shader its motion vectors.
+    // rendering pass.
     put_in_list(ini, L"GENERAL", L"EffectSearchPaths", L"reshade-shaders\\Shaders", L".\\reshade-shaders\\Shaders\\**");
     put_in_list(ini, L"GENERAL", L"TextureSearchPaths", L"reshade-shaders\\Textures",
                 L".\\reshade-shaders\\Textures\\**");
-    put_in_list(ini, L"GENERAL", L"PreprocessorDefinitions", L"DLSS5_MV_PROVIDER=", L"DLSS5_MV_PROVIDER=3");
+    const int provider = motion_vectors(engine_dir, ini);
+    put_provider(ini, provider);
+    const std::string techniques =
+        provider == 3 ? "Lumenite_Kernel@lumenite_Kernel.fx,DLSS5_Feed@DLSS5_Feed.fx" : "DLSS5_Feed@DLSS5_Feed.fx";
     put_default(ini, L"GENERAL", L"PresetPath", L".\\ReShadePreset.ini");
     // On every start: RenoDX and the Feeder work whenever DLSS 5 is loaded;
     // whether it shows is the effects' state (the menu switches them; RenoDX's
@@ -123,8 +168,8 @@ void write_reshade_config(const std::wstring &engine_dir, const Settings &s, boo
     GetPrivateProfileStringW(L"RenoDX.DLSS5", L"NRScreenshotSource", L"0", source, 8, ini.c_str());
     if (std::wstring(source) == L"0") put(ini, L"RenoDX.DLSS5", L"NRScreenshotSource", L"2");
     const std::wstring preset = engine_dir + L"\\ReShadePreset.ini";
-    put_plain(preset, "Techniques", dlss5_loaded && dlss5_on ? kDlss5Techniques : "");
-    put_plain(preset, "TechniqueSorting", kDlss5Techniques);
+    put_plain(preset, "Techniques", dlss5_loaded && dlss5_on ? techniques : "");
+    put_plain(preset, "TechniqueSorting", techniques);
     // The Feeder writes its file with working defaults on its first start;
     // Glasir only switches it (and makes one only to keep it off).
     const std::wstring feeder = engine_dir + L"\\dlss5-feed.cfg";

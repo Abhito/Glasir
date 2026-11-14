@@ -124,6 +124,7 @@ std::string status_line(const MenuFrame &f, const MpvState &mpv) {
     }
     out += out.empty() ? "" : "  \xC2\xB7  ";
     out += f.source_hdr ? "HDR" : "SDR";
+    if (f.source_auto) out += " (auto)";
     if (f.host && f.host->rates) {
         double source = 0, real = 0, generated = 0;
         f.host->rates(source, real, generated);
@@ -142,6 +143,8 @@ void picture(const MenuFrame &f, const MpvState &mpv) {
     section("PICTURE");
     reshade::api::effect_runtime *rt = f.runtime;
     const reshade::api::effect_technique feed = rt->find_technique("DLSS5_Feed.fx", "DLSS5_Feed");
+    // LumeniteFX's motion vectors, in an install whose DLSS 5 is from Glasir
+    // 0.1.3 or before (reshade_config.cpp); switched with the feed.
     const reshade::api::effect_technique kernel = rt->find_technique("lumenite_Kernel.fx", "Lumenite_Kernel");
     if (feed.handle == 0) {
         ImGui::BeginDisabled();
@@ -269,14 +272,17 @@ void display(const MenuFrame &f, const MpvState &mpv) {
     }
     const bool hdr = f.source_hdr;
     if (!hdr && !f.hdr_available) return;  // a card without HDR modes: nothing to switch to
-    if (ImGui::Button(hdr ? "Switch to SDR" : "Switch to HDR", ImVec2(-1, 0))) {
-        // Glasir starts the picture again in the other mode (mpv's exit
-        // code 42 asks for that).
-        save(f, "video", "mode", hdr ? "sdr" : "hdr");
+    static constexpr const char *kPicture[] = {"auto", "sdr", "hdr"};
+    const int picture = radio_row("Picture", {"Automatic", "SDR", "HDR"}, f.source_auto ? 0 : hdr ? 2 : 1);
+    if (picture >= 0) {
+        // Glasir starts the picture again in that mode (mpv's exit code 42
+        // asks for that).
+        save(f, "video", "mode", kPicture[picture]);
         f.mpv->command({"quit", "42"});
     }
-    note(hdr ? "Restarts the picture in SDR." : "Restarts the picture in HDR (needs HDR on the console and a card "
-                                                "with a 10-bit mode).");
+    note(f.source_auto ? (hdr ? "The console sends HDR. Glasir follows it when that changes."
+                              : "The console sends SDR. Glasir follows it when that changes.")
+                       : "Automatic tells SDR from HDR by the picture. A change starts the picture again.");
 }
 
 }  // namespace
