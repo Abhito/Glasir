@@ -53,4 +53,7 @@ a2a9bf7fbc1d75d09660ca2e701e4d7fb0cf5457b94da47e1825032fa2b3671a  anime4k/Anime4
 
 To update: download the files from the new upstream tag, replace them here,
 update the table and the hashes, and note it in the commit message.
-`reshade_overlay.hpp` needs Dear ImGui and is not used yet.
+`reshade_overlay.hpp` is for the Dear ImGui version of `imgui/` (it checks),
+but its docking branch: only `src/framegen/reshade_ui.cpp` includes it, for
+the table of ReShade's functions alone (that file says how). A new ReShade
+tag wants the Dear ImGui tag its header names.

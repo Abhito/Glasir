@@ -16,6 +16,10 @@
 //
 //   fg_eval.exe [--clip NAME] [--out DIR] [--methods repeat,blend,motion] SEQ_DIR
 //
+// --picture X0 Y0 X1 Y1: the picture's place in frames with black bars (the
+// add-on's PictureOnly): the generator works on that part alone. --adjacent
+// and --set NAME VALUE: below.
+//
 // With --out, the first in-between frame of each clip and method is saved as
 // <clip>_<method>.png for looking at.
 
@@ -153,6 +157,9 @@ int wmain(int argc, wchar_t **argv) {
     // of a capture are what the add-on worked on) and only save it - there is
     // no true frame between them to score against.
     bool adjacent = false;
+    // --picture X0 Y0 X1 Y1: where the picture is in frames with black bars (the add-on has it from mpv);
+    // clips it does not fit in are made whole.
+    fg::Picture picture;
     std::vector<std::pair<std::wstring, double>> tuning;  // --set NAME VALUE
     fs::path seq_dir;
     for (int i = 1; i < argc; ++i) {
@@ -165,6 +172,13 @@ int wmain(int argc, wchar_t **argv) {
         else if (a == L"--stats") show_stats = true;
         else if (a == L"--layers") show_layers = true;
         else if (a == L"--adjacent") adjacent = true;
+        else if (a == L"--picture" && i + 4 < argc) {
+            picture.x0 = UINT(_wtoi(argv[i + 1]));
+            picture.y0 = UINT(_wtoi(argv[i + 2]));
+            picture.x1 = UINT(_wtoi(argv[i + 3]));
+            picture.y1 = UINT(_wtoi(argv[i + 4]));
+            i += 4;
+        }
         else if (a == L"--set" && i + 2 < argc) {
             tuning.emplace_back(argv[i + 1], _wtof(argv[i + 2]));
             i += 2;
@@ -248,6 +262,21 @@ int wmain(int argc, wchar_t **argv) {
         else if (name == L"soft_wide") interp.soft_wide = float(value);
         else if (name == L"guess_cost") interp.guess_cost = float(value);
         else if (name == L"guess_ratio") interp.guess_ratio = float(value);
+        else if (name == L"hist_search") interp.hist_search = int(value);
+        else if (name == L"hist_cost") interp.hist_cost = float(value);
+        else if (name == L"hist_ratio") interp.hist_ratio = float(value);
+        else if (name == L"edge_cost") interp.edge_cost = float(value);
+        else if (name == L"edge_tol") interp.edge_tol = float(value);
+        else if (name == L"edge_fit") interp.edge_fit = float(value);
+        else if (name == L"edge_still") interp.edge_still = float(value);
+        else if (name == L"edge_explains") interp.edge_explains = float(value);
+        else if (name == L"edge_search") interp.edge_search = int(value);
+        else if (name == L"hud_detail") interp.hud_detail = float(value);
+        else if (name == L"hud_same") interp.hud_same = float(value);
+        else if (name == L"hud_across") interp.hud_across = float(value);
+        else if (name == L"hud_pixels") interp.hud_pixels = float(value);
+        else if (name == L"hud_spread") interp.hud_spread = int(value);
+        else if (name == L"hud_slack") interp.hud_slack = float(value);
         else if (name == L"persist_max") interp.persist_max = float(value);
         else if (name == L"warp_taps") interp.warp_taps = int(value);
         else if (name == L"warp_ring") interp.warp_ring = int(value);
@@ -316,7 +345,9 @@ int wmain(int argc, wchar_t **argv) {
         const UINT w = frames[0].w, h = frames[0].h;
 
         std::string error;
-        if ((interp.width() != w || interp.height() != h) && !interp.create(gpu.device.Get(), w, h, error)) {
+        const fg::Picture place = picture.x1 <= w && picture.y1 <= h ? picture : fg::Picture{};
+        if ((interp.width() != w || interp.height() != h || !(interp.picture() == place)) &&
+            !interp.create(gpu.device.Get(), w, h, error, place)) {
             fprintf(stderr, "interpolator: %s\n", error.c_str());
             return 1;
         }
@@ -341,6 +372,7 @@ int wmain(int argc, wchar_t **argv) {
             const std::wstring &method = method_names[m];
             Result r;
             const size_t step = adjacent ? 1 : 2;
+            interp.forget_history();
             for (size_t i = 0; i + step < frames.size(); i += step) {
                 const Image &truth = frames[i + (adjacent ? 0 : 1)];
                 const size_t next = i + step;
@@ -352,12 +384,14 @@ int wmain(int argc, wchar_t **argv) {
                 } else {
                     fg::DrawOptions o;
                     o.method = method == L"motion" ? fg::Method::motion : fg::Method::blend;
+                    o.follows = i > 0;  // each pair starts on the frame the last one ended on
                     // A few untimed runs first, then the timed one.
                     for (int warm = 0; warm < 3; ++warm)
                         interp.draw(gpu.ctx.Get(), srv[i].Get(), srv[next].Get(), rtv.Get(), o);
                     r.ms.push_back(timed(gpu, [&] {
                         interp.draw(gpu.ctx.Get(), srv[i].Get(), srv[next].Get(), rtv.Get(), o);
                     }));
+                    if (o.method == fg::Method::motion) interp.keep_history(gpu.ctx.Get());
                     if (show_stats && o.method == fg::Method::motion && interp.stats_texture()) {
                         D3D11_TEXTURE2D_DESC sd{};
                         interp.stats_texture()->GetDesc(&sd);

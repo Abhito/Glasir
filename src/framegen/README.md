@@ -68,9 +68,42 @@ Settings are in `ReShade.ini`, section `[GLASIR_FRAMEGEN]`:
 | `RequireDedupLauncher` | 1 | Only run with the link from Glasir's dedup. |
 | `Method` | motion | `motion` = motion-compensated, `blend` = 50/50 mix. |
 | `Quality` | high | `high`, or `fast`: fewer candidates per pixel, about half the drawing cost (glasir.ini). |
-| `DebugMarker` | 0 | Magenta square in the top-left corner of generated frames. |
+| `PictureOnly` | 1 | A switch (below). With black bars around the picture (a 16:9 game on a 21:9 screen), frames are generated from the picture alone; mpv says where it is. Better scenery at the picture's edges and less GPU time, but a HUD near those edges loses the bars' protection (docs/FRAMEGEN-LEARNINGS.md, 4.6): `StillHud` is for that, keep the two together. Does nothing without bars. |
+| `EdgeRules` | 1 | A switch. The strip along the frame's edges that only one frame shows in a camera turn is drawn along the turn's motion (same section). |
+| `StillHud` | 1 | A switch. Icons and digits drawn over fast-moving scenery are held where they are: the cells that hold detail which stands still while they move get no motion (docs/FRAMEGEN-LEARNINGS.md, 4.7). Gives a HUD near the picture's edges back what `PictureOnly` takes from it, and acts on a frame without bars too. The scenery right beside such a HUD (a cell, 16 px) stands still with it. |
+| `HistorySearch` | 0 | A switch, and a test: 1 = the motion search also starts from what each block did over the pair before (docs/FRAMEGEN-LEARNINGS.md, 4.5). Better offline on some captures, little either way on others. |
+| `DebugMarker` | 0 | Magenta square in the top-left corner of generated frames (the picture's corner with `PictureOnly`). |
 | `LogStats` | 1 | A line in `ReShade.log` every 5 s (see below). |
 | `MpvPipe` | glasir | mpv IPC pipe for the OSD message. |
+
+The four switches are not in `ReShade.ini` unless one differs from its
+default: the add-on writes the other keys there at its first start, but a
+switch only when the panel (below) is used to choose against the default,
+and it takes out one that says what the default says. So a later version
+can change a default for everyone who did not choose otherwise (the three
+that are on were tests, off, until 11-16: docs/FRAMEGEN-LEARNINGS.md, 4.8).
+To set one by hand, add the line (`StillHud=0`). `ReShade.log` has what is
+in use at start: `switches: PictureOnly=1 EdgeRules=1 StillHud=1
+HistorySearch=0`.
+
+The four switches, `DebugMarker` and `LogStats` can also be changed
+while playing: ReShade's own overlay (Home), page Add-ons, under "Glasir
+Frame Generation". The panel says what the generator is working on (the
+whole frame, or the picture and where it is), each checkbox works at once
+and is remembered in `ReShade.ini`. `PictureOnly` makes the generator anew a
+quarter of a second later. It is a page for trying things on the scene in
+front of you; `Enabled` and `Quality` are not on it, as Glasir writes those
+from glasir.ini at every start (its own menu, Tab, has them).
+
+The panel is drawn with ReShade's Dear ImGui, the menu with the add-on's own
+(src/overlay). `reshade_ui.cpp` keeps them apart: it calls ReShade's
+functions through the table ReShade hands out and is the only file that
+includes `reshade_overlay.hpp`. That header's inline functions carry Dear
+ImGui's own names (in one DLL with the real ones the linker would keep one
+of each for both) and it is written for the docking branch, which
+third_party/imgui is not; so they are left out and two type names are
+declared by hand. A ReShade without the overlay, or with another Dear ImGui
+version, gets no panel and the switches stay in the file.
 
 ## When it generates
 
@@ -193,7 +226,12 @@ The frame in between (`fg_interp.h`, shaders in `flow.hlsl`):
 3. The motion at the frame in between, per 16x16 pixels: of the motions found
    nearby in both directions (and those found where each says the content came
    from and went to), the one under which A, shifted back half way, and B,
-   shifted forward half way, agree best.
+   shifted forward half way, agree best. (With `StillHud`: a cell that moves
+   but holds edges which are the same in A and B where they are - not along
+   the motion, and not the same again where the motion takes them - holds a
+   HUD over the scenery. It and the cells right around it get no motion, here
+   and as A's and B's blocks, so step 4 treats the HUD as it treats anything
+   that stands still.)
 4. Each pixel tries the motions of the 3x3 cells around it and none, judged
    on a small cross of five pixels by how well A and B agree there; a motion
    several cells share is sampled once and counts as many votes. Where only
@@ -471,11 +509,14 @@ for SDR - also when mpv draws SDR into a 10-bit back buffer, as it does on a
 10-bit desktop, so 16-bit always means PQ to the viewer and the eval tools) and
 the frames the add-on drew between them (`between_f01_f02.png`, ...). Press it
 while something looks wrong (frame generation must be on); there is one short
-hitch while it saves, and mpv's OSD says when the files are written (about
-130 MB per capture).
+hitch while it saves, and a toast says when the files are written (100-150 MB
+per capture). The bug report made with them (`Bug reports\`, a few MB) holds
+JPEG pictures of these frames, HDR tone-mapped to SDR, not the frames: for
+measuring, ask for the folder in `Captures\` that its system.txt names.
 
-`python src\framegen\eval\view_captures.py [FOLDER]` (needs Python with Pillow,
-and ffmpeg on PATH) shows them: pick a capture on the left, then
+`tools\view_captures.cmd [FOLDER]` (double-click it for the captures in
+`out\Glasir\Captures`; it starts `src\framegen\eval\view_captures.py` and
+needs Python with Pillow, and ffmpeg on PATH) shows them: pick a capture on the left, then
 Left/Right steps through f01, the generated frame, f02, ... tone-mapped like
 `eval\compare.sh`. Zoom (mouse wheel, `1` = 100 %) and pan stay put while
 stepping, so one spot can be compared frame to frame; Space plays the capture
@@ -484,7 +525,8 @@ the generated frames for comparison; Up/Down changes capture; the status bar
 gives the frame pixel under the cursor. Delete (or the Delete button) moves the
 capture on show to the Recycle Bin and opens the next one, so a run of
 captures can be pruned key by key; Shift+Delete deletes it for good, after
-asking.
+asking. An unpacked bug report can be given as the folder: its pictures are
+shown the same way.
 
 `eval\fg_eval.exe Captures` scores such folders like its own clips:
 it makes the frame between f01 and f03 and compares it with f02 (and f03-f05
@@ -559,7 +601,9 @@ in the first eight, before step 5: 1.18 mean, 1.55 worst. All 64 pairs now
   crops of HDR frames side by side; `eval\blockiness.py --diff A.png B.png`
   lists where two versions of a frame differ most; `eval\view_captures.py`
   shows captures (Tk, Pillow, ffmpeg on PATH); `eval\needle_score.py` and
-  `eval\head_score.py` score thin hair and heads on captures (`FG_CAP`).
+  `eval\head_score.py` score thin hair and heads on captures (`FG_CAP`);
+  `eval\hud_score.py` scores what stands still on the screen while the scene
+  moves (a HUD), on `fg_eval --adjacent` frames.
 - `eval\raw_pace.exe` sends raw frames at an even 1/60 s like a card (ffmpeg
   `-re` jumps 4-43 ms between frames, and with VRR the screen shows that).
 - Not ported yet: the prototype's VRR measurement under PresentMon

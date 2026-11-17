@@ -107,8 +107,31 @@ cbuffer Params : register(b0)
     float layer_select_dom;   // L_SELECT: layer_merge, layer_still and layer_hcentre only while the dominant motion is at least this (px per frame:
                               // the camera follows the player; 0 = always)
     float layer_merge_core;   // L_SELECT: 1 = only a slow core near the middle across (layer_still, layer_still_dx) takes fragments (0 = any)
-    float3 pad_end;
+    int has_hist;             // SearchCS: the last pair's motion is bound (hist): searched around as well
+    float hist_cost;          // SearchCS: what that search finds wins if it fits better by this (luma SAD) ...
+    float hist_ratio;         // ... and at most this share as badly
+    float edge_cost;          // MidCS: a pixel whose sample in a or b is off the frame costs this instead of the comparison,
+                              // under a motion the frame has further in too (< 0: compared with the edge pixel)
+    float edge_tol;           // MidCS: ... has: within this share of its length (+ 2 px) of the motion found there (0 = not asked)
+    float edge_fit;           // MidCS: ... and it carries a onto b there this well (luma per pixel; 0 = not asked)
+    int edge_search;          // SearchCS: 1 = a block the coarser estimate takes off the frame keeps the estimate,
+                              // unless it matched better than edge_fit
+    float2 target_origin;     // WarpPS: where the frame's first pixel is in the target (the picture inside a frame with bars)
+    float edge_still;         // MidCS: ... not for a pixel that a and b show this alike where it is (luma): it stands still
+    float edge_explains;      // WarpPS: 1 = where the other frame's sample is off the frame, one frame alone explains the
+                              // pixel whatever that frame's own motion says; 0 = only if its motion agrees, as elsewhere
+    float hud_detail;         // MidCS: a pixel with this much contrast in a and in b (luma), the same edge in both where it
+                              // is, across the cell's motion and not where that would have taken it, is static detail
+                              // (StaticDetail; 0 = not looked for)
+    float hud_same;           // MidCS: ... the same: as bright within this share of the contrast, facing the same way within twice it
+    float hud_across;         // MidCS: ... across: its gradient along the motion is at least this share of it
+    float hud_pixels;         // HoldCS: a cell with this many such pixels stands still
+    int hud_spread;           // HoldCS: ... and so do the cells this far around it (0 or 1)
+    float hud_slack;          // MidCS: ... not where the motion would have taken it: nor within 1 px + this share of the
+                              // motion's length further or nearer along it (< 0 = at that place only)
 };
+
+bool InFrame(float2 p) { return all(p >= 0.0) && all(p < float2(src_size)); }
 
 // [0] how much brighter b is than a (StatsCS), [1] share of cells that did
 // not match, [2] share of the cells with detail that did not, [3] share of
@@ -354,13 +377,16 @@ Texture2D<float> luma_from : register(t0);  // the frame whose blocks are follow
 Texture2D<float> luma_to : register(t1);    // the frame they are looked for in
 Texture2D<float2> pred : register(t2);      // the field one level coarser
 Texture2D<float> stats : register(t3);
+// The last pair's motion at this level, when this pair's frame a was its
+// frame b: a's blocks into the frame before a.
+Texture2D<float2> hist : register(t4);
 RWTexture2D<float2> field_out : register(u0);
 
 groupshared float g_block[BLOCK * BLOCK];
 groupshared float g_window[WIN * WIN];
 groupshared float g_cost[MAX_SIDE * MAX_SIDE];
 groupshared uint g_best;
-groupshared float3 g_found[2];  // per search: the motion found (xy) and its cost (z)
+groupshared float3 g_found[3];  // per search: the motion found (xy) and its cost (z)
 
 // One group per 8x8 block. Every offset within the radius around the coarser
 // estimate is tried (sum of absolute differences, plus lambda per pixel of
@@ -397,12 +423,31 @@ void SearchCS(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID, uint gi : SV
     const int r = min(radius, MAX_RADIUS);
     const int win = BLOCK + 2 * r;
     const int side = 2 * r + 1;
-    // Around the estimate, then around no motion (unless the estimate is none).
-    const int searches = has_pred && guess_cost >= 0.0 ? 2 : 1;
+    // What the block did over the last pair, carried on: a's block went on as
+    // it came; b's block is looked up where it was in a.
+    float2 before = 0;
+    if (has_hist)
+    {
+        const float2 h = hist.Load(int3(cell, 0));
+        if (swap)
+        {
+            const int2 was = clamp(int2(floor((float2(origin) + BLOCK * 0.5 + h) / BLOCK)), 0, grid_size - 1);
+            before = hist.Load(int3(was, 0));
+        }
+        else
+        {
+            before = -h;
+        }
+    }
+    // Around the estimate, then around no motion (unless the estimate is none),
+    // then around the last pair's motion (unless that is one of the two).
+    const bool zero_search = has_pred && guess_cost >= 0.0;
+    const int searches = has_hist ? 3 : zero_search ? 2 : 1;
     for (int s = 0; s < searches; ++s)
     {
-        const int2 shift = s == 0 ? int2(round(estimate)) : int2(0, 0);
-        const bool run = s == 0 || any(int2(round(estimate)) != 0);
+        const int2 shift = s == 0 ? int2(round(estimate)) : s == 1 ? int2(0, 0) : int2(round(before));
+        const bool run = s == 0 || (s == 1 && zero_search && any(int2(round(estimate)) != 0)) ||
+                         (s == 2 && any(shift != int2(round(estimate))) && any(shift != 0));
         GroupMemoryBarrierWithGroupSync();  // g_block written, the last search's window and costs read
         if (run)
         {
@@ -461,7 +506,15 @@ void SearchCS(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID, uint gi : SV
     }
     if (gi != 0) return;
     float3 found = g_found[0];
-    if (searches == 2 && g_found[1].z + guess_cost <= guess_ratio * found.z) found = g_found[1];
+    if (searches >= 2 && g_found[1].z + guess_cost <= guess_ratio * found.z) found = g_found[1];
+    if (searches == 3 && g_found[2].z + hist_cost <= hist_ratio * found.z) found = g_found[2];
+    // A block the coarser estimate takes off the frame - scenery leaving in a camera turn - is not in the
+    // other frame to be found: what the search matched instead is the edge pixels repeated. The estimate,
+    // made on larger blocks that are still partly on the frame, stays - unless the block did find itself
+    // (a HUD at the frame's edge over the turning scenery stands still and matches).
+    if (edge_search != 0 && has_pred && !InFrame(float2(origin) + BLOCK * 0.5 + estimate) &&
+        found.z > edge_fit * float(BLOCK * BLOCK))
+        found.xy = estimate;
     field_out[cell] = found.xy;
 }
 #endif
@@ -510,12 +563,19 @@ Texture2D<float> stats : register(t4);
 SamplerState linear_clamp : register(s0);
 RWTexture2D<float2> field_out : register(u0);
 RWTexture2D<float2> cost_out : register(u1);  // the best cost per pixel, and the cell's detail, for CutCS
+RWTexture2D<float> still_out : register(u2);  // StaticDetail, for HoldCS
 
 static float g_gain;
 
 // How badly v carries a onto b across this cell of the frame in between: a is
 // sampled where the content was (t of the way back along v), b where it went.
-float BilateralCost(int2 origin, float2 v)
+// trust: v may take the content off the frame (PanAgrees). A sample off the
+// frame reads the edge pixel, which says nothing about v: the strip along the
+// frame's edge that only one frame shows in a camera turn matched no motion,
+// least of all the turn's. Such a pixel costs edge_cost instead - unless a and
+// b show the same there where it is: a HUD at the frame's edge stands still
+// over the turning scenery, and is not carried off with it.
+float BilateralCost(int2 origin, float2 v, bool trust)
 {
     float sum = 0;
     [loop] for (int y = 0; y < BLOCK; ++y)
@@ -523,8 +583,17 @@ float BilateralCost(int2 origin, float2 v)
         [unroll] for (int x = 0; x < BLOCK; ++x)
         {
             const float2 q = float2(origin + int2(x, y)) + 0.5;
-            sum += abs(g_gain * luma_a.SampleLevel(linear_clamp, (q - t * v) * inv_size, 0) -
-                       luma_b.SampleLevel(linear_clamp, (q + (1.0 - t) * v) * inv_size, 0));
+            const float2 qa = q - t * v, qb = q + (1.0 - t) * v;
+            const float d = abs(g_gain * luma_a.SampleLevel(linear_clamp, qa * inv_size, 0) -
+                                luma_b.SampleLevel(linear_clamp, qb * inv_size, 0));
+            float cost = d;
+            if (trust && !(InFrame(qa) && InFrame(qb)))
+            {
+                const float here = abs(g_gain * luma_a.SampleLevel(linear_clamp, q * inv_size, 0) -
+                                       luma_b.SampleLevel(linear_clamp, q * inv_size, 0));
+                if (here >= edge_still) cost = edge_cost;
+            }
+            sum += cost;
         }
     }
     return sum;
@@ -547,11 +616,116 @@ float Detail(Texture2D<float> luma, int2 origin)
     return dev / float(BLOCK * BLOCK);
 }
 
+// How many of the cell's pixels show detail that stands still while the cell
+// moves with v: a HUD drawn over the scenery in a camera turn - icons, digits,
+// often see-through. Its cells take the scenery's motion (most of their pixels
+// are scenery), and then nothing says the HUD stands still: the scenery is
+// drawn through it, or it goes along as a faint copy of itself. (Beside a
+// black bar the search's coarse blocks, held still by the bar, said so for
+// everything near it, scenery included.) HoldCS makes such cells stand still.
+//
+// Static detail is an edge that is the same edge in a and in b where it is:
+// as bright, and facing the same way. Two kinds of scenery pass that and are
+// ruled out:
+// - an edge along the motion. Sliding along itself it stays what it is; and
+//   where a step's line crosses its own moved copy in a turn, it is even the
+//   same edge in both frames (stairs came out in patches);
+// - an edge the motion explains: the same again where v takes it (a pattern
+//   that repeats at the step's length) - or a little further or nearer along
+//   v, by a share of its length (hud_slack): in a fast pan past pillars, one's
+//   edge where another's was, the motion found is a few pixels off, and a
+//   patch of the pillar was held as a HUD. The motions of a's block and of
+//   b's block there (va, vb, where they move) explain it as well: the cell's
+//   own motion can be the wrong one of two edges, a post's in a and another's
+//   in b, while the blocks have the pan.
+float StaticDetail(int2 origin, float2 v, float2 va, float2 vb)
+{
+    const int2 maxp = src_size - 1;
+    const float2 along = normalize(v);
+    const float2 ways[3] = {v, va, vb};
+    float n = 0;
+    [loop] for (int y = 0; y < BLOCK; ++y)
+    {
+        [loop] for (int x = 0; x < BLOCK; ++x)
+        {
+            const int2 q = origin + int2(x, y);
+            if (any(q < 1) || any(q >= maxp)) continue;
+            const float la = g_gain * luma_a.Load(int3(q, 0)), lb = luma_b.Load(int3(q, 0));
+            const float2 da = g_gain * float2(luma_a.Load(int3(q + int2(1, 0), 0)) - luma_a.Load(int3(q - int2(1, 0), 0)),
+                                              luma_a.Load(int3(q + int2(0, 1), 0)) - luma_a.Load(int3(q - int2(0, 1), 0)));
+            const float2 db = float2(luma_b.Load(int3(q + int2(1, 0), 0)) - luma_b.Load(int3(q - int2(1, 0), 0)),
+                                     luma_b.Load(int3(q + int2(0, 1), 0)) - luma_b.Load(int3(q - int2(0, 1), 0)));
+            const float det = min(length(da), length(db));
+            if (det < hud_detail || abs(la - lb) > hud_same * det || length(da - db) > 2.0 * hud_same * det) continue;
+            if (abs(dot(da + db, along)) < hud_across * length(da + db)) continue;
+            const float2 c = float2(q) + 0.5;
+            bool explained = false;
+            [unroll] for (int w = 0; w < 3; ++w)
+            {
+                const float len = length(ways[w]);
+                [branch] if (len >= 1.5)
+                {
+                    const float slack = hud_slack < 0.0 ? 0.0 : 1.0 + hud_slack * len;
+                    [unroll] for (int k = -2; k <= 2; ++k)
+                    {
+                        const float2 to = ways[w] * (1.0 + slack * float(k) / (2.0 * len));
+                        const float moved_b = luma_b.SampleLevel(linear_clamp, (c + to) * inv_size, 0);
+                        const float moved_a = g_gain * luma_a.SampleLevel(linear_clamp, (c - to) * inv_size, 0);
+                        if (abs(la - moved_b) < 0.5 * det || abs(lb - moved_a) < 0.5 * det) explained = true;
+                    }
+                }
+            }
+            if (explained) continue;
+            n += 1.0;
+        }
+    }
+    return n;
+}
+
 // pred_size: the size of the search's fields (BLOCK cells); grid_size: this
 // pass's cells (MID_BLOCK).
 float2 FwdAt(float2 pos) { return fwd.Load(int3(clamp(int2(floor(pos / BLOCK)), 0, pred_size - 1), 0)); }
 float2 BwdAt(float2 pos) { return -bwd.Load(int3(clamp(int2(floor(pos / BLOCK)), 0, pred_size - 1), 0)); }
 
+
+// Whether v, which takes this cell's content off the frame in a or in b, can
+// be taken on trust there: it is the motion of the frame further in, at the
+// nearest place along it that both frames show (a's block there if the content
+// leaves, b's if it comes in), and it carries a onto b there. A camera turn
+// goes on to the frame's edge; a wrong match in smoke or a flash agrees with
+// nothing further in, or fits nothing there.
+bool PanAgrees(float2 center, float2 v)
+{
+    if (edge_cost < 0.0) return false;
+    const float2 ca = center - t * v, cb = center + (1.0 - t) * v;
+    const bool leaves = !InFrame(cb), comes = !InFrame(ca);
+    if (!leaves && !comes) return true;  // the cell's rim only
+    if (leaves && comes) return false;
+    const float2 size = float2(src_size);
+    const float m = BLOCK;
+    float2 at, found;
+    if (leaves)
+    {
+        // a's blocks that are still on the frame in b.
+        const float2 from = max(-v, 0.0) + m, to = min(size - v, size) - m;
+        if (any(from > to)) return false;
+        at = clamp(ca, from, to);
+        found = FwdAt(at);
+        at += t * v;
+    }
+    else
+    {
+        // b's blocks that were on it in a.
+        const float2 from = max(v, 0.0) + m, to = min(size + v, size) - m;
+        if (any(from > to)) return false;
+        at = clamp(cb, from, to);
+        found = BwdAt(at);
+        at -= (1.0 - t) * v;
+    }
+    if (edge_tol > 0.0 && length(found - v) > edge_tol * length(v) + 2.0) return false;
+    if (edge_fit > 0.0 && BilateralCost(int2(at) - BLOCK / 2, v, false) > edge_fit * float(BLOCK * BLOCK)) return false;
+    return true;
+}
 
 // The motion of each cell of the frame in between, picked from the motions
 // found for a and b: the cell's own and its neighbours' in both directions,
@@ -569,7 +743,7 @@ void MidCS(uint3 id : SV_DispatchThreadID)
     g_gain = GainFrom(stats);
 
     float2 best = 0;
-    float best_cost = BilateralCost(origin, 0) + lambda;  // none, slightly discouraged
+    float best_cost = BilateralCost(origin, 0, false) + lambda;  // none, slightly discouraged
     [loop] for (uint i = 0; i < 9; ++i)
     {
         const int2 n = clamp(search_cell + int2(int(i % 3u) - 1, int(i / 3u) - 1), 0, pred_size - 1);
@@ -578,7 +752,7 @@ void MidCS(uint3 id : SV_DispatchThreadID)
         float2 cand[4] = {f, b, FwdAt(center - t * f), BwdAt(center + (1.0 - t) * b)};
         [unroll] for (int c = 0; c < 4; ++c)
         {
-            const float cost = BilateralCost(origin, cand[c]);
+            const float cost = BilateralCost(origin, cand[c], PanAgrees(center, cand[c]));
             if (cost < best_cost)
             {
                 best_cost = cost;
@@ -588,6 +762,47 @@ void MidCS(uint3 id : SV_DispatchThreadID)
     }
     field_out[cell] = best;
     cost_out[cell] = float2(best_cost / float(BLOCK * BLOCK), max(Detail(luma_a, origin), Detail(luma_b, origin)));
+    // (A cell slower than 3 px of the frame stands still as it is.)
+    float still_pixels = 0;
+    [branch] if (hud_detail > 0.0 && dot(best, best) >= 2.25)
+        still_pixels = StaticDetail(origin, best, fwd.Load(int3(search_cell, 0)), -bwd.Load(int3(search_cell, 0)));
+    still_out[cell] = still_pixels;
+}
+#endif
+
+// ---- Cells that hold a HUD stand still ----------------------------------------------
+
+#if defined(HOLD)
+Texture2D<float2> mid_in : register(t0);   // the motion at the frame in between, after its median
+Texture2D<float2> fwd_in : register(t1);   // a's blocks, b's blocks: the same grid at level 0
+Texture2D<float2> bwd_in : register(t2);
+Texture2D<float> still_in : register(t3);  // MidCS's StaticDetail
+RWTexture2D<float2> mid_out : register(u0);
+RWTexture2D<float2> fwd_out : register(u1);
+RWTexture2D<float2> bwd_out : register(u2);
+
+// A cell with enough static detail (hud_pixels), and those right around it
+// (hud_spread: the inside of an icon has no edge of its own), get no motion:
+// at the frame in between, and as a's and b's blocks. Everything WarpPS knows
+// about a cell that stands still then holds for the HUD - what both frames
+// show there is not swapped for moving scenery (near_still), and a one-frame
+// option that would take the HUD's pixels along pays for going against that
+// frame's blocks (FieldMismatch).
+[numthreads(8, 8, 1)]
+void HoldCS(uint3 id : SV_DispatchThreadID)
+{
+    const int2 cell = int2(id.xy);
+    if (any(cell >= grid_size)) return;
+    float n = 0;
+    [unroll] for (int k = 0; k < 9; ++k)
+    {
+        const int2 o = int2(k % 3 - 1, k / 3 - 1);
+        if (max(abs(o.x), abs(o.y)) <= hud_spread) n = max(n, still_in.Load(int3(clamp(cell + o, 0, grid_size - 1), 0)));
+    }
+    const bool held = n >= hud_pixels;
+    mid_out[cell] = held ? float2(0, 0) : mid_in.Load(int3(cell, 0));
+    fwd_out[cell] = held ? float2(0, 0) : fwd_in.Load(int3(cell, 0));
+    bwd_out[cell] = held ? float2(0, 0) : bwd_in.Load(int3(cell, 0));
 }
 #endif
 
@@ -2347,7 +2562,7 @@ void Candidate(int i, int cells, int ring, int2 first, float2 g, float none_tie,
 // for whatever two moving samples happen to agree.
 float4 WarpPS(float4 pos : SV_Position) : SV_Target
 {
-    const float2 x = pos.xy;  // the pixel's centre, full resolution
+    const float2 x = pos.xy - target_origin;  // the pixel's centre, full resolution
     const int2 p = int2(x);
     const int2 maxp = src_size - 1;
     const float gain = GainFrom(stats);
@@ -2507,13 +2722,13 @@ float4 WarpPS(float4 pos : SV_Position) : SV_Target
                 // Where b's sample would be off screen, a alone is the answer
                 // whatever a's blocks say: those along the edge of the screen,
                 // half their pixels off it, often find no proper motion.
-                one_ok[i] = in_b ? costa[i] : occlusion_cost;
+                one_ok[i] = (in_b || edge_explains == 0.0) ? costa[i] : occlusion_cost;
             }
             if (in_b)
             {
                 costb[i] = occlusion_cost + flow_weight * FieldMismatch(bwd, pb, -v);
                 if (costb[i] < occlusion_cost + 0.05) costb[i] += StandsStill(color_b, color_a, pb, -v, 1.0 / gain);
-                one_ok[i] = min(one_ok[i], in_a ? costb[i] : occlusion_cost);
+                one_ok[i] = min(one_ok[i], (in_a || edge_explains == 0.0) ? costb[i] : occlusion_cost);
             }
             // layer_ghost: where a frame shows the layer, it does not show what moves otherwise
             // (the scenery behind a character the camera turns around): an option that does not

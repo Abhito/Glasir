@@ -65,6 +65,11 @@ void draw_again(ID3D11DeviceContext *context, ID3D11Texture2D *back_buffer);
 // encoding (SDR, HDR10, scRGB).
 void note_color_space(reshade::api::color_space color_space);
 
+// The picture's part of a width x height back buffer: without the black bars
+// mpv draws around it (all of it until mpv has said where the picture is).
+// On the thread of mpv's presents.
+D3D11_BOX picture_box(UINT width, UINT height);
+
 // The menu is open (mpv should get every frame, frame generation rest).
 bool menu_open();
 

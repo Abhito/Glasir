@@ -293,6 +293,8 @@ D3D11_BOX picture_box(const MpvState::Osd &osd, UINT width, UINT height) {
 
 void set_host(const Host &host) { g.host = host; }
 
+D3D11_BOX picture_box(UINT width, UINT height) { return picture_box(g.mpv.state().osd, width, height); }
+
 void toast(const std::string &text, double seconds) {
     std::lock_guard lock(g.local_m);
     g.local_text = text;
