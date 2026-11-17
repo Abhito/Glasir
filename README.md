@@ -252,11 +252,14 @@ To report a problem:
 
 1. Press **`F9`** while it is happening. Glasir saves a zip in
    `Bug reports\` with the logs, the settings, what is installed, your PC's
-   GPUs, drivers and screens, and (with frame generation on) the frames on
-   screen at that moment.
+   GPUs, drivers and screens, and (with frame generation on) pictures of the
+   frames on screen at that moment. It is a few MB.
 2. [Open an issue on GitHub](https://github.com/Abhito/Glasir/issues), say
-   what you saw, and attach the zip. A report with frames is 10-100 MB, too
-   big for an issue: share it through a file host instead.
+   what you saw, and attach the zip.
+
+The frames themselves are saved too, in `Captures\` (about 100 MB each
+time, never sent anywhere). Keep the folder the report names until the issue
+is closed, in case they are asked for; delete the others whenever you like.
 
 **Save a bug report** in Glasir's window, or `Glasir.exe --bug-report`,
 saves one without frames. Paths in it have your user folder replaced by

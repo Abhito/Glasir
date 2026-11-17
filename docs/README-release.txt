@@ -58,9 +58,12 @@ Glasir from asking GitHub.
 REPORTING A PROBLEM
 
 Press F9 while it happens: a zip with the logs, settings, your GPUs and
-screens (and the frames on screen, with frame generation on) is saved in
-Bug reports\. Your Windows user name is left out. Attach it to an issue at
-https://github.com/Abhito/Glasir/issues and say what you saw.
+screens (and pictures of the frames on screen, with frame generation on) is
+saved in Bug reports\. It is a few MB and your Windows user name is left out.
+Attach it to an issue at https://github.com/Abhito/Glasir/issues and say what
+you saw. The frames themselves are saved in Captures\ (about 100 MB each
+time): keep the folder the report names in case they are asked for, and
+delete the others whenever you like.
 
 To remove Glasir, delete its folder.
 

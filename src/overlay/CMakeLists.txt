@@ -33,5 +33,5 @@ target_link_libraries(glasir_overlay PUBLIC glasir_reshade_api glasir_imgui glas
 # A developer tool, not shipped.
 add_executable(shot_convert tools/shot_convert.cpp screenshot.cpp)
 glasir_component(shot_convert)
-target_include_directories(shot_convert PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(shot_convert PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src/common")
 target_link_libraries(shot_convert PRIVATE d3d11 ole32 windowscodecs)

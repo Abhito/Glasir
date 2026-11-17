@@ -9,9 +9,12 @@ Shows each capture in Captures\\ in order - f01, the frame generated
 between f01 and f02, f02, ... f05 - tone-mapped for an SDR screen the way
 eval\\compare.sh does (16-bit captures are HDR10/PQ). The view stays put while
 stepping, so the same spot can be compared frame to frame. Started by
-View-FrameGen-Captures.bat; another folder can be given:
+tools\\view_captures.cmd; another folder can be given:
 
     pythonw view_captures.py [CAPTURES_DIR]
+
+An unpacked bug report is such a folder too: its capture holds JPEG pictures
+of the frames (already tone-mapped), shown as they are.
 
 Keys: Left/Right frame (on into the next capture), Up/Down capture, Home/End,
 Space play/pause, R real frames only, wheel or +/- zoom at the cursor, drag
@@ -59,7 +62,10 @@ BG, PANEL, REAL, GEN, DIM, SELECT = "#1e1e1e", "#2d2d2d", "#7cdb8a", "#ffa94d", 
 
 
 def png_info(path):
-    """Width, height and bits per channel, from the PNG header."""
+    """Width, height and bits per channel, from the PNG header (a bug report's JPEG: 8 bits)."""
+    if path.lower().endswith(".jpg"):
+        with Image.open(path) as img:
+            return img.width, img.height, 8
     with open(path, "rb") as f:
         head = f.read(26)
     if head[:8] != b"\x89PNG\r\n\x1a\n":
@@ -70,11 +76,14 @@ def png_info(path):
 def decode(path):
     """The frame as 8-bit RGB for the screen, and the box inside its black bars."""
     w, h, depth = png_info(path)
-    vf = PQ_TO_SDR if depth == 16 else "format=rgb24"
-    out = subprocess.run(
-        [FFMPEG, "-v", "error", "-i", path, "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        capture_output=True, check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
-    img = Image.frombytes("RGB", (w, h), out)
+    if path.lower().endswith(".jpg"):
+        img = Image.open(path).convert("RGB")
+    else:
+        vf = PQ_TO_SDR if depth == 16 else "format=rgb24"
+        out = subprocess.run(
+            [FFMPEG, "-v", "error", "-i", path, "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            capture_output=True, check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        img = Image.frombytes("RGB", (w, h), out)
     # Black bars beside (or above and below) the picture: the box of all that
     # is not black, kept only where the margins match (a dark scene's edge is
     # not a bar).
@@ -92,13 +101,15 @@ def frames_of(folder):
         names = set(os.listdir(folder))
     except OSError:
         return []
-    reals = sorted((n for n in names if re.fullmatch(r"f\d+\.png", n)), key=lambda n: int(n[1:-4]))
+    # The capture's PNGs, or the JPEG pictures of them in a bug report.
+    ext = ".png" if any(re.fullmatch(r"f\d+\.png", n) for n in names) else ".jpg"
+    reals = sorted((n for n in names if re.fullmatch(r"f\d+" + re.escape(ext), n)), key=lambda n: int(n[1:-4]))
     seq = []
     for i, r in enumerate(reals):
         seq.append((r, "real", f"real frame {r[:-4]}"))
         if i + 1 < len(reals):
             nxt = reals[i + 1][:-4]
-            between = f"between_{r[:-4]}_{nxt}.png"
+            between = f"between_{r[:-4]}_{nxt}{ext}"
             if between in names:
                 seq.append((between, "generated", f"generated between {r[:-4]} and {nxt}"))
     return seq

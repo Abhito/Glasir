@@ -626,7 +626,7 @@ void draw(Screen &s) {
             else if (state == BugReport::Failed)
                 dim("Could not save it: " + narrow(s.bug->error));
             else
-                dim("F9 while playing adds the frames on screen.");
+                dim("F9 while playing adds pictures of the frames on screen.");
         }
     }
     s.content_height = ImGui::GetCursorPosY() + ImGui::GetStyle().WindowPadding.y;

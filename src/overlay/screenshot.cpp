@@ -5,47 +5,18 @@
 #include <DirectXPackedVector.h>
 #include <wincodec.h>
 
-#include <algorithm>
-#include <cmath>
 #include <cstring>
+
+#include "tone_map.h"
 
 using Microsoft::WRL::ComPtr;
 
 namespace glasir::overlay::shot {
 namespace {
 
-// Below this share of the SDR white, tone mapping leaves light as it is;
-// above it, the brightest channel rolls off toward 1.0.
-constexpr float kKnee = 0.75f;
 // GPU copies are read back on a later frame; one not done after this many
 // frames is given up.
 constexpr int kMaxTries = 120;
-
-// SMPTE ST 2084 (PQ): a 0-1 signal to nits.
-float pq_to_nits(float e) {
-    constexpr float m1 = 2610.0f / 16384.0f, m2 = 2523.0f / 4096.0f * 128.0f;
-    constexpr float c1 = 3424.0f / 4096.0f, c2 = 2413.0f / 4096.0f * 32.0f, c3 = 2392.0f / 4096.0f * 32.0f;
-    const float p = std::pow(std::clamp(e, 0.0f, 1.0f), 1.0f / m2);
-    return 10000.0f * std::pow(std::max(p - c1, 0.0f) / (c2 - c3 * p), 1.0f / m1);
-}
-
-// 10-bit PQ code to nits, made once.
-const float *pq_table() {
-    static float table[1024];
-    static bool made = false;
-    if (!made) {
-        for (int i = 0; i < 1024; ++i) table[i] = pq_to_nits(i / 1023.0f);
-        made = true;
-    }
-    return table;
-}
-
-float srgb_encode(float v) {
-    v = std::clamp(v, 0.0f, 1.0f);
-    return v <= 0.0031308f ? 12.92f * v : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
-}
-
-BYTE to_byte(float v) { return BYTE(std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f)); }
 
 std::wstring hr_text(const char *what, HRESULT hr) {
     wchar_t text[96];
@@ -123,43 +94,13 @@ void scrgb(const Frame &frame, size_t pixel, float rgb[3]) {
         for (int c = 0; c < 3; ++c) rgb[c] = DirectX::PackedVector::XMConvertHalfToFloat(h[c]);
         return;
     }
-    // PQ, BT.2020 primaries: to linear BT.709 (ITU-R BT.2087), 1.0 = 80 nits.
-    const float *nits = pq_table();
+    // PQ, BT.2020 primaries.
     UINT32 v;
     memcpy(&v, frame.pixels.data() + pixel * 4, 4);
-    const float r = nits[v & 1023], g = nits[(v >> 10) & 1023], b = nits[(v >> 20) & 1023];
-    rgb[0] = (1.660491f * r - 0.587641f * g - 0.072850f * b) / 80.0f;
-    rgb[1] = (-0.124550f * r + 1.132900f * g - 0.008349f * b) / 80.0f;
-    rgb[2] = (-0.018151f * r - 0.100579f * g + 1.118730f * b) / 80.0f;
+    tone::pq2020_to_scrgb(v & 1023, (v >> 10) & 1023, (v >> 20) & 1023, rgb);
 }
 
-void tone_map(const float in[3], float reference_white_nits, BYTE bgr[3]) {
-    const float white = reference_white_nits / 80.0f;
-    float c[3] = {in[0] / white, in[1] / white, in[2] / white};
-    const float y = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
-    if (!(y > 0.0f)) {
-        bgr[0] = bgr[1] = bgr[2] = 0;
-        return;
-    }
-    // Outside BT.709 (a channel below zero): toward grey of the same
-    // luminance, just enough to come inside.
-    const float low = std::min({c[0], c[1], c[2]});
-    if (low < 0.0f) {
-        const float t = y / (y - low);
-        for (float &v : c) v = y + (v - y) * t;
-    }
-    // Above the knee the brightest channel rolls off (its slope stays 1 at
-    // the knee) and the others keep their ratio to it.
-    const float high = std::max({c[0], c[1], c[2]});
-    if (high > kKnee) {
-        const float rolled = kKnee + (1.0f - kKnee) * std::tanh((high - kKnee) / (1.0f - kKnee));
-        const float scale = rolled / high;
-        for (float &v : c) v *= scale;
-    }
-    bgr[0] = to_byte(srgb_encode(c[2]));
-    bgr[1] = to_byte(srgb_encode(c[1]));
-    bgr[2] = to_byte(srgb_encode(c[0]));
-}
+void tone_map(const float in[3], float reference_white_nits, BYTE bgr[3]) { tone::to_sdr(in, reference_white_nits, bgr); }
 
 bool save(const Frame &frame, const std::wstring &folder, const std::wstring &stem, std::vector<std::wstring> &files,
           std::string &error) {

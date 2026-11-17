@@ -6,6 +6,7 @@ add_library(glasir_app_core STATIC
     bug_report.cpp
     components.cpp
     files.cpp
+    frame_preview.cpp
     gpu.cpp
     http.cpp
     mpv_launch.cpp
@@ -20,7 +21,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_
 file(READ components.json GLASIR_TESTED_COMPONENTS)
 configure_file(tested_components.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/tested_components.h" @ONLY)
 target_include_directories(glasir_app_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(glasir_app_core PUBLIC glasir_capture glasir_common glasir_version dxgi winhttp bcrypt wintrust crypt32 version user32 ole32)
+target_link_libraries(glasir_app_core PUBLIC glasir_capture glasir_common glasir_version dxgi winhttp bcrypt wintrust crypt32 version user32 ole32 windowscodecs)
 
 configure_file(glasir.rc.in "${CMAKE_CURRENT_BINARY_DIR}/glasir.rc" @ONLY)
 add_executable(glasir WIN32 main.cpp launcher.cpp setup_ui.cpp glasir.manifest "${CMAKE_CURRENT_BINARY_DIR}/glasir.rc")
