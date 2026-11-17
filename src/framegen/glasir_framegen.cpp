@@ -50,6 +50,7 @@
 #include "fg_interp.h"
 #include "framegen_link.h"
 #include "overlay.h"
+#include "reshade_ui.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -84,10 +85,16 @@ struct Settings {
     int toggle_key = VK_F8;
     int capture_key = VK_F9;    // saves the frames around this moment (Capture below)
     bool dedup_when_off = false;  // 1: mpv gets new frames only while frame generation is off too
+    // The switches (the panel has them; switch_setting below for how they are kept).
+    bool picture_only = true;     // with black bars around the picture, the generator works on the picture alone
+    bool edge_rules = true;       // the strip along the frame's edges that only one frame shows in a camera turn
+    bool still_hud = true;        // a HUD over fast scenery is held where it is
+    bool history_search = false;  // a test: the search also tries what each block did over the last pair
     std::string mpv_pipe = "glasir";
 };
 
 Settings g_settings;
+const Settings kDefaults;
 
 // Every value is read as text and parsed here: ReShade's own bool and int
 // readers take neither "true" nor "0x77". A missing key gets the default
@@ -108,19 +115,43 @@ void bad_setting(const char *key, const std::string &text) {
              kSection, key, text.c_str());
 }
 
-void setting(const char *key, bool &value) {
-    std::string text;
-    if (!read_text(key, text)) {
-        reshade::set_config_value(nullptr, kSection, key, value ? "1" : "0");
-        return;
-    }
+bool parse_bool(std::string text, bool &value) {
     for (auto &c : text) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
     if (text == "1" || text == "true" || text == "yes" || text == "on")
         value = true;
     else if (text == "0" || text == "false" || text == "no" || text == "off")
         value = false;
     else
+        return false;
+    return true;
+}
+
+void setting(const char *key, bool &value) {
+    std::string text;
+    if (!read_text(key, text))
+        reshade::set_config_value(nullptr, kSection, key, value ? "1" : "0");
+    else if (!parse_bool(text, value))
         bad_setting(key, text);
+}
+
+// A switch (PictureOnly, EdgeRules, StillHud, HistorySearch) is in ReShade.ini
+// only while it differs from its default: a missing key stays missing, and one
+// that says what the default says is taken out - here, and by the panel when a
+// switch is put back. So a later version can change a default for everyone
+// who did not choose otherwise. (A null value removes the key: ReShade 6.4 on,
+// and this add-on needs a newer one to load at all.)
+void forget_setting(const char *key) {
+    reshade::set_config_value(nullptr, kSection, key, static_cast<const char *>(nullptr));
+}
+
+void switch_setting(const char *key, bool &value) {
+    const bool standard = value;
+    std::string text;
+    if (!read_text(key, text)) return;
+    if (!parse_bool(text, value))
+        bad_setting(key, text);
+    else if (value == standard)
+        forget_setting(key);
 }
 
 void setting(const char *key, int &value) {
@@ -157,6 +188,12 @@ void load_settings() {
     setting("MpvPipe", s.mpv_pipe);
     setting("CaptureKey", s.capture_key);
     setting("DedupWhenOff", s.dedup_when_off);
+    switch_setting("PictureOnly", s.picture_only);
+    switch_setting("EdgeRules", s.edge_rules);
+    switch_setting("StillHud", s.still_hud);
+    switch_setting("HistorySearch", s.history_search);
+    log_line(reshade::log::level::info, "switches: PictureOnly=%d EdgeRules=%d StillHud=%d HistorySearch=%d",
+             s.picture_only, s.edge_rules, s.still_hud, s.history_search);
     std::string method = s.method == fg::Method::blend ? "blend" : "motion";
     setting("Method", method);
     for (auto &c : method) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
@@ -1210,6 +1247,20 @@ public:
         real = real_fps_;
         generated = generated_fps_;
     }
+    // For the panel on ReShade's Add-ons page (draw_panel() below), on mpv's
+    // render thread like the rest: the switches, changed while playing.
+    void set_history_search(bool on);
+    void set_picture_only(bool on);
+    void set_edge_rules(bool on);
+    void set_still_hud(bool on);
+    bool broken() const { return broken_; }
+    // What the generator works on: the back buffer's size (0: none yet) and
+    // the picture's place in it (all 0: the whole of it).
+    void working_on(UINT &width, UINT &height, fg::Picture &picture) const {
+        width = frames_[0] ? width_ : 0;
+        height = frames_[0] ? height_ : 0;
+        picture = picture_made_;
+    }
     void on_effects_finished(reshade::api::effect_runtime *runtime) {
         if (mpv_swapchain_ && runtime->get_native() != mpv_swapchain_) return;  // another runtime's effects
         effects_ran_ = true;
@@ -1252,7 +1303,8 @@ public:
 private:
     bool init(ID3D11Device *device);
     bool ensure_frames(const D3D11_TEXTURE2D_DESC &bb);
-    bool draw_between(ID3D11Texture2D *back_buffer, int a, int b);
+    void follow_picture(const D3D11_TEXTURE2D_DESC &bb);
+    bool draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool follows, bool keep);
     void reset_history() {
         prev_ = -1;
         dt_interval_ = 0;
@@ -1277,6 +1329,16 @@ private:
         return format_ == DXGI_FORMAT_R10G10B10A2_UNORM && color_space_ == reshade::api::color_space::hdr10_pq;
     }
     void toggle(reshade::api::effect_runtime *runtime);
+    void use_edge_rules() {
+        interp_.edge_cost = g_settings.edge_rules ? 0.01f : -1.0f;
+        interp_.edge_explains = g_settings.edge_rules ? 0.0f : 1.0f;
+    }
+    void use_still_hud() {
+        interp_.hud_detail = g_settings.still_hud ? 0.04f : 0.0f;
+        if (g_settings.still_hud && !still_hud_logged_)
+            log_line(reshade::log::level::info, "StillHud=1: cells that hold a HUD over moving scenery stand still");
+        still_hud_logged_ = g_settings.still_hud;
+    }
     void watch_drops(double now, bool stalled);
     void stats(double now);
     TraceLine trace_line(double now, double dt, int queued, const char *what) const {
@@ -1335,6 +1397,15 @@ private:
 
     // A real frame still to present after the frame in between.
     bool pending_ = false;
+    // HistorySearch: interp_ holds the motion of the pair that ended on the last real frame, found at the
+    // source's pace - what the next pair's search may start from. Any present without such a pair drops it.
+    bool history_fresh_ = false;
+    bool history_logged_ = false;
+    bool still_hud_logged_ = false;
+    // PictureOnly: where mpv has the picture in the back buffer (all 0: it fills it) - as last seen, for how
+    // many presents in a row, what interp_ was made for, and one it could not be made for.
+    fg::Picture picture_seen_, picture_made_, picture_failed_;
+    int picture_steady_ = 0;
     int pending_slot_ = 0;
     double pending_target_ = 0, pending_since_ = 0;
     double pending_now_ = 0, pending_dt_ = 0, pending_half_ = 0, pending_latest_ = 0;
@@ -1443,6 +1514,11 @@ bool FrameGen::ensure_frames(const D3D11_TEXTURE2D_DESC &bb) {
         interp_.warp_taps = 1;
         interp_.soft_temp = 0.02f;
     }
+    interp_.hist_search = g_settings.history_search ? 1 : 0;
+    use_edge_rules();
+    use_still_hud();
+    picture_made_ = picture_failed_ = fg::Picture{};  // made for the whole frame: follow_picture() takes it from here
+    picture_steady_ = 0;
     failed_w_ = failed_h_ = 0;
     width_ = bb.Width;
     height_ = bb.Height;
@@ -1451,8 +1527,60 @@ bool FrameGen::ensure_frames(const D3D11_TEXTURE2D_DESC &bb) {
     return true;
 }
 
+// PictureOnly: makes the generator for the picture's part of the back buffer once mpv has had the picture in
+// the same place for a quarter of a second of presents (a window being resized moves it with every frame,
+// and each change makes the generator's textures anew).
+void FrameGen::follow_picture(const D3D11_TEXTURE2D_DESC &bb) {
+    constexpr int kSteady = 15;
+    fg::Picture now;
+    if (g_settings.picture_only) {
+        const D3D11_BOX box = glasir::overlay::picture_box(bb.Width, bb.Height);
+        if (box.right - box.left < bb.Width || box.bottom - box.top < bb.Height) now = {box.left, box.top, box.right, box.bottom};
+    }
+    if (!(now == picture_seen_)) {
+        picture_seen_ = now;
+        picture_steady_ = 0;
+    } else if (picture_steady_ < kSteady) {
+        ++picture_steady_;
+    }
+    // picture_failed_ is all 0 when none failed, which is also "the whole frame": back to that it always goes.
+    if (now == picture_made_ || (now.x1 != 0 && now == picture_failed_) || picture_steady_ < kSteady) return;
+    std::string error;
+    if (interp_.create(device_.Get(), bb.Width, bb.Height, error, now)) {
+        picture_made_ = now;
+        picture_failed_ = fg::Picture{};
+        if (now.x1 != 0)
+            log_line(reshade::log::level::info, "PictureOnly=1: the picture is %ux%u at %u,%u of the %ux%u back buffer",
+                     now.x1 - now.x0, now.y1 - now.y0, now.x0, now.y0, bb.Width, bb.Height);
+        else if (g_settings.picture_only)
+            log_line(reshade::log::level::info, "PictureOnly=1: the picture fills the back buffer");
+        else
+            log_line(reshade::log::level::info, "PictureOnly=0: the whole %ux%u back buffer again", bb.Width, bb.Height);
+    } else {
+        log_line(reshade::log::level::error, "PictureOnly=1: no generator for the picture alone (%s); the whole frame it is",
+                 error.c_str());
+        picture_failed_ = now;
+        picture_made_ = fg::Picture{};
+        if (!interp_.create(device_.Get(), bb.Width, bb.Height, error)) {
+            // As a failure in ensure_frames(): tried again at the next size.
+            for (auto &t : frames_) t.Reset();
+            for (auto &v : views_) v.Reset();
+            failed_w_ = bb.Width;
+            failed_h_ = bb.Height;
+            failed_format_ = bb.Format;
+            width_ = height_ = 0;
+            log_line(reshade::log::level::error, "the frame generator did not start at %ux%u (%s); trying again at the next size",
+                     bb.Width, bb.Height, error.c_str());
+        }
+    }
+    if (capture_.active()) capture_.reset();
+    reset_history();
+}
+
 // Draws the frame in between frames_[a] and frames_[b] into the back buffer.
-bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b) {
+// follows: the last call drew the pair that ended on frames_[a] and kept its
+// motion; keep: this pair's motion is worth keeping for the next one.
+bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool follows, bool keep) {
     ComPtr<ID3D11RenderTargetView> rtv;
     HRESULT hr = device_->CreateRenderTargetView(back_buffer, nullptr, &rtv);
     if (FAILED(hr)) return fail("CreateRenderTargetView", hr), false;
@@ -1460,6 +1588,7 @@ bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b) {
     fg::DrawOptions o;
     o.method = g_settings.method;
     o.t = 0.5f;
+    o.follows = follows;
     o.marker = g_settings.marker;
     o.marker_level = 0.75f;                                                // sRGB-encoded
     if (pq()) o.marker_level = 0.5f;                                       // PQ, about 90 nits
@@ -1467,6 +1596,14 @@ bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b) {
 
     StateBackup backup(context_.Get());
     interp_.draw(context_.Get(), views_[a].Get(), views_[b].Get(), rtv.Get(), o);
+    if (g_settings.history_search && keep && o.method == fg::Method::motion) {
+        interp_.keep_history(context_.Get());
+        history_fresh_ = true;
+        if (follows && !history_logged_) {
+            history_logged_ = true;
+            log_line(reshade::log::level::info, "HistorySearch=1: searching around the last pair's motion as well");
+        }
+    }
     return true;
 }
 
@@ -1520,6 +1657,49 @@ void FrameGen::set_fast(bool fast) {
     log_line(reshade::log::level::info, "quality %s", fast ? "fast" : "high");
 }
 
+// From the panel. A check (DebugMarker, LogStats) is kept in ReShade.ini as
+// the add-on reads it at start; a switch only while it differs from its
+// default (switch_setting).
+void save_switch(const char *key, bool on) {
+    reshade::set_config_value(nullptr, kSection, key, on ? "1" : "0");
+    log_line(reshade::log::level::info, "%s=%d (from the panel)", key, on ? 1 : 0);
+}
+
+void save_switch(const char *key, bool on, bool standard) {
+    if (on != standard) return save_switch(key, on);
+    forget_setting(key);
+    log_line(reshade::log::level::info, "%s=%d (from the panel; the default)", key, on ? 1 : 0);
+}
+
+// Read at every draw. What was kept for the search is from before the switch:
+// the next pair starts without it.
+void FrameGen::set_history_search(bool on) {
+    g_settings.history_search = on;
+    interp_.hist_search = on ? 1 : 0;
+    interp_.forget_history();
+    history_fresh_ = history_logged_ = false;
+    save_switch("HistorySearch", on, kDefaults.history_search);
+}
+
+// follow_picture() makes the generator anew, for the picture or for the whole
+// frame, a quarter of a second of presents later.
+void FrameGen::set_picture_only(bool on) {
+    g_settings.picture_only = on;
+    save_switch("PictureOnly", on, kDefaults.picture_only);
+}
+
+void FrameGen::set_edge_rules(bool on) {
+    g_settings.edge_rules = on;
+    use_edge_rules();
+    save_switch("EdgeRules", on, kDefaults.edge_rules);
+}
+
+void FrameGen::set_still_hud(bool on) {
+    g_settings.still_hud = on;
+    use_still_hud();
+    save_switch("StillHud", on, kDefaults.still_hud);
+}
+
 // New frames dropped upstream: mpv is not keeping up with the source.
 //
 // Drops seen now happened since the previous frame. When that frame had a
@@ -1571,6 +1751,8 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
     // Whatever the effects did, it was for this frame only.
     const bool neural = effects_ran_;
     effects_ran_ = false;
+    const bool history = history_fresh_;
+    history_fresh_ = false;  // until this present draws a pair
     // A real frame left over from a present whose finish_present never came
     // (it failed, or was a "still drawing" try) is dropped.
     if (pending_) trace(pending_now_, pending_dt_, pending_queued_, "generated-real-lost");
@@ -1652,6 +1834,8 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
         if (capture_.active()) capture_.reset();
         return;
     }
+    follow_picture(bb);
+    if (!frames_[0]) return;
 
     if (now >= next_hz_try_) {
         // Every second: the window may move to another screen or the mode
@@ -1695,7 +1879,11 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
         ++skipped_queue_;
     }
 
-    if (generate && draw_between(back_buffer.Get(), prev_, cur)) {
+    // The last pair's motion says where things go on to only at an even pace:
+    // a late frame, or mpv drawing the same frame again for its OSD, is a pair
+    // of another length.
+    const bool steady = interval_ > 0 && dt > 0.5 * interval_ && dt < 1.5 * interval_;
+    if (generate && draw_between(back_buffer.Get(), prev_, cur, history && steady, steady)) {
         pending_ = true;
         pending_slot_ = cur;
         // The real frame goes out half an interval after the frame in between
@@ -1901,6 +2089,85 @@ void unregister_present_events() {
     reshade::unregister_event<reshade::addon_event::present>(on_present);
 }
 
+// ---- The panel on ReShade's Add-ons page --------------------------------------
+//
+// Under this add-on's name on the Add-ons page of ReShade's own overlay (Home):
+// what the generator is doing, and its switches, so one can be flipped while
+// looking at the scene it is about. ReShade draws its overlay in mpv's
+// present, on the same thread as the events above, into the frame the
+// generator then takes. Frame generation itself and its quality are not here:
+// those are Glasir's settings (glasir.ini, its menu), written into ReShade.ini
+// at every start.
+void draw_panel(reshade::api::effect_runtime *) {
+    namespace ui = fg::reshade_ui;
+    char line[200];
+    double source = 0, real = 0, generated = 0;
+    g_gen.rates(source, real, generated);
+    if (g_gen.broken())
+        ui::text("Failed: see ReShade.log.");
+    else if (!g_gen.ready())
+        ui::text("Not running: it needs Glasir's own capture with dedup.");
+    else if (!g_settings.enabled)
+        ui::text("Off (F8, or Glasir's menu: Tab).");
+    else if (real <= 0)
+        ui::text("On.");
+    else {
+        snprintf(line, sizeof(line), "On: %.1f real + %.1f generated frames a second.", real, generated);
+        ui::text(line);
+    }
+    UINT width = 0, height = 0;
+    fg::Picture picture;
+    g_gen.working_on(width, height, picture);
+    if (width != 0 && picture.x1 != 0) {
+        snprintf(line, sizeof(line), "Works on the picture alone: %ux%u at %u,%u of the %ux%u frame.",
+                 picture.x1 - picture.x0, picture.y1 - picture.y0, picture.x0, picture.y0, width, height);
+        ui::text(line);
+    } else if (width != 0) {
+        snprintf(line, sizeof(line), "Works on the whole %ux%u frame%s.", width, height,
+                 g_settings.picture_only ? " (no black bars in it)" : "");
+        ui::text(line);
+    }
+
+    ui::heading("Switches");
+    bool on = g_settings.picture_only;
+    if (ui::checkbox("Picture only", &on)) g_gen.set_picture_only(on);
+    ui::tooltip("With black bars around the picture (a 16:9 game on a 21:9 screen), frames are\n"
+                "generated from the picture alone. Better scenery at the picture's edges and less\n"
+                "GPU time; a HUD near those edges loses the bars' protection (Still HUD is for that).");
+    on = g_settings.edge_rules;
+    if (ui::checkbox("Edge rules", &on)) g_gen.set_edge_rules(on);
+    ui::tooltip("In a camera turn, the strip along the edges that only one frame shows is drawn\n"
+                "along the turn's motion. Meant to go with Picture only where there are bars.");
+    on = g_settings.still_hud;
+    if (ui::checkbox("Still HUD", &on)) g_gen.set_still_hud(on);
+    ui::tooltip("Icons and digits drawn over fast-moving scenery are held where they are instead of\n"
+                "fading or breaking up; the scenery right beside them (16 px) stands still with them.\n"
+                "Gives a HUD near the picture's edges back what Picture only takes from it; also acts\n"
+                "on a frame without bars.");
+    on = g_settings.history_search;
+    if (ui::checkbox("History search", &on)) g_gen.set_history_search(on);
+    ui::tooltip("A test: the motion search also starts from what each block did over the pair before.");
+
+    ui::heading("Checks");
+    on = g_settings.marker;
+    if (ui::checkbox("Marker on generated frames", &on)) {
+        g_settings.marker = on;
+        save_switch("DebugMarker", on);
+    }
+    ui::tooltip("A magenta square in the corner of every generated frame.");
+    on = g_settings.log_stats;
+    if (ui::checkbox("Log the rates", &on)) {
+        g_settings.log_stats = on;
+        save_switch("LogStats", on);
+    }
+    ui::tooltip("A line in ReShade.log every 5 s: frame rates, timings, why frames were not generated.");
+
+    ui::space();
+    ui::note("Each works at once and is remembered (ReShade.ini, [GLASIR_FRAMEGEN]).");
+    ui::note("As they come: the first three switches on, History search off.");
+    ui::note("What each gains and loses: docs/FRAMEGEN-LEARNINGS.md in Glasir's source.");
+}
+
 void set_menu_host();
 
 void on_init_effect_runtime(reshade::api::effect_runtime *) {
@@ -1947,18 +2214,25 @@ void set_menu_host() {
     glasir::overlay::set_host(host);
 }
 
+bool g_panel = false;
+
 }  // namespace
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
         if (!reshade::register_addon(module)) return FALSE;
+        // A ReShade without the overlay (or with another Dear ImGui): no
+        // panel, the switches stay in ReShade.ini.
+        g_panel = fg::reshade_ui::init(reshade::internal::get_reshade_module_handle());
+        if (g_panel) reshade::register_overlay(nullptr, draw_panel);
         reshade::register_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
         reshade::register_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
         reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);
         register_present_events();
         break;
     case DLL_PROCESS_DETACH:
+        if (g_panel) reshade::unregister_overlay(nullptr, draw_panel);
         unregister_present_events();
         reshade::unregister_event<reshade::addon_event::destroy_device>(on_destroy_device);
         reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);

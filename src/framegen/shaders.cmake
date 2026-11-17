@@ -8,6 +8,7 @@ set(GLASIR_FRAMEGEN_SHADERS
     "cs_5_0|SearchCS|SEARCH|g_search_cs|search_cs.h|flow.hlsl"
     "cs_5_0|MedianCS|MEDIAN|g_median_cs|median_cs.h|flow.hlsl"
     "cs_5_0|MidCS|MID|g_mid_cs|mid_cs.h|flow.hlsl"
+    "cs_5_0|HoldCS|HOLD|g_hold_cs|hold_cs.h|flow.hlsl"
     "ps_5_0|WarpPS|WARP|g_warp_ps|warp_ps.h|flow.hlsl"
     "cs_5_0|StatsCS|STATS|g_stats_cs|stats_cs.h|flow.hlsl"
     "cs_5_0|CutCS|CUT|g_cut_cs|cut_cs.h|flow.hlsl"

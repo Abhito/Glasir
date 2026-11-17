@@ -32,6 +32,27 @@
   change to the shaders or `fg_interp.h`, compare `fg_eval.exe` scores before
   and after (clips/captures stay outside the repo; the prototype's are in
   `mpv_video\MPV-SW-Capture\framegen-addon\eval\seq` and `framegen-captures`).
+  The prototype's captures are 3440 wide with the picture at x = 440-3000:
+  `--picture 440 0 3000 1440` scores what the add-on draws there
+  (`PictureOnly`). `fg_eval`'s defaults are the add-on's (edge rules, HUD
+  hold); `--set edge_cost -1 --set edge_explains 1 --set hud_detail 0` is
+  without them.
+  WarpPS is so large that code added to it costs time even when never run
+  (1.4 ms a frame once): put new work in a pass of its own, and time
+  `fg_eval --profile` against the build before with the new thing off, the
+  builds in turn. `eval\hud_score.py` scores a HUD over moving scenery. A
+  few frames differ between two runs of the same build (the layer passes):
+  run twice before calling a frame changed.
+  Its switches (`PictureOnly`, `EdgeRules`, `StillHud`: on by default;
+  `HistorySearch`: a test, off) are in ReShade.ini only while one differs
+  from its default (`switch_setting`), so a default can still be changed
+  later: never write them at start as the other keys are.
+  They are also checkboxes on ReShade's Add-ons page
+  (`reshade_ui.cpp`, README.md there). To drive ReShade's overlay in a test
+  without focus: post Home to mpv's window, then arrow keys, Enter (into an
+  add-on's box), Space, Esc; Tab also opens Glasir's menu. Its mouse follows
+  the real cursor whatever is posted. It opens on the page it was closed on:
+  `Selected=0x1BEC192E` in ReShade.ini's `[OVERLAY] Docking` is Add-ons.
   `GLASIR_FRAMEGEN_CAPTURE_AFTER=<s>` makes the add-on save frames to
   `out\Glasir\Captures` (16-bit PQ for HDR: tone-map before viewing).
 - Glasir.exe opens its launcher window unless `--no-dialogs`, `--play` or
@@ -92,7 +113,10 @@
   `Glasir.exe --update-from out\Glasir-x.y.z.zip`, or an older-version build
   running `--update` against GitHub, always on a copy of the app folder
   (never on out\Glasir while the owner uses it). F9 can be posted to mpv's
-  window (class `mpv`) without focus; reports go to `Bug reports\`.
+  window (class `mpv`) without focus; reports go to `Bug reports\`. The zip
+  holds JPEG pictures of the F9 frames (`src/app/frame_preview.h`, under
+  GitHub's 25 MB for an attachment); the frames themselves stay in
+  `Captures\`.
 - Do not build in a folder under `%TEMP%`: MSBuild does not track headers
   there, so a changed `glasir_version.h` is not recompiled (the exe keeps the
   old version). Use a worktree elsewhere, e.g. next to the repo.

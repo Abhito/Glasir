@@ -37,7 +37,7 @@ add_library(glasir_framegen_interp INTERFACE)
 target_include_directories(glasir_framegen_interp INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}" "${_shader_dir}")
 add_dependencies(glasir_framegen_interp glasir_framegen_shaders)
 
-add_library(glasir_framegen SHARED glasir_framegen.cpp)
+add_library(glasir_framegen SHARED glasir_framegen.cpp reshade_ui.cpp)
 set_target_properties(glasir_framegen PROPERTIES OUTPUT_NAME "zz-glasir-framegen" SUFFIX ".addon64")
 glasir_component(glasir_framegen)
 target_include_directories(glasir_framegen PRIVATE "${PROJECT_SOURCE_DIR}/src/common")
