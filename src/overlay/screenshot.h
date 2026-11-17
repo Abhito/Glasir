@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "compositor.h"  // Encoding
+#include "tone_map.h"
 
 namespace glasir::overlay::shot {
 
@@ -38,18 +39,14 @@ bool supported(DXGI_FORMAT format);
 // Whether this frame is HDR: PQ in 10 bits, or scRGB (half floats).
 bool is_hdr(const Frame &frame);
 
-// The reference (paper) white HDR is tone-mapped from: BT.2408's 203 nits,
-// as the menu is drawn in HDR.
-constexpr float kReferenceWhiteNits = 203.0f;
+// The reference (paper) white HDR is tone-mapped from (tone_map.h).
+constexpr float kReferenceWhiteNits = tone::kReferenceWhiteNits;
 
 // Linear BT.709 light in scRGB units (1.0 = 80 nits) of one pixel of an
 // HDR frame; values outside BT.709 stay as they are (negative, or above).
 void scrgb(const Frame &frame, size_t pixel, float rgb[3]);
 
-// SDR sRGB (0-255, B G R order) of HDR light in scRGB units: the colours
-// outside BT.709 brought in toward grey, then everything above
-// reference_white_nits * knee rolled off smoothly to the SDR white, on the
-// brightest channel so that hues and saturation stay.
+// SDR sRGB (0-255, B G R order) of HDR light in scRGB units (tone::to_sdr).
 void tone_map(const float scrgb[3], float reference_white_nits, BYTE bgr[3]);
 
 // Writes stem.png (and stem.jxr for HDR) into folder. files: the names

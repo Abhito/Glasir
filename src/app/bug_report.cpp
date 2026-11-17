@@ -13,6 +13,7 @@
 
 #include "components.h"
 #include "files.h"
+#include "frame_preview.h"
 #include "glasir_version.h"
 #include "log.h"
 
@@ -83,10 +84,19 @@ std::wstring capture_folder(const std::wstring &app_dir, const std::wstring &fol
     const fs::path f = fs::weakly_canonical(folder, ec);
     if (ec || !fs::is_directory(f, ec) || _wcsicmp(f.parent_path().c_str(), captures.c_str()) != 0 ||
         !std::regex_match(f.filename().wstring(), std::wregex(LR"(\d{8}-\d{6}-\d{3}(-\d{1,2})?)"))) {
-        log(L"bug report: {} is not a Captures folder; the report has no frames", folder);
+        log(L"bug report: {} is not a Captures folder; the report has no pictures of the frames", folder);
         return L"";
     }
     return f.wstring();
+}
+
+// The JPEGs of a report's frames together stay under this, so that the zip
+// can be attached to a GitHub issue (25 MB at most).
+constexpr uint64_t kMaxPreviewBytes = 20u << 20;
+
+std::wstring megabytes(uint64_t bytes) {
+    return bytes < 10u << 20 ? std::format(L"{:.1f} MB", double(bytes) / (1 << 20))
+                             : std::format(L"{} MB", (bytes + (1 << 19)) >> 20);
 }
 
 std::wstring stamp() {
@@ -226,8 +236,26 @@ bool save_bug_report(const BugReportInput &in, std::wstring &zip, std::wstring &
         listed += std::format(L"  {} ({} KB)\n", item.to, (clean.size() + 1023) / 1024);
     }
 
-    std::wstring frames_name;
-    if (!frames.empty()) frames_name = fs::path(frames).filename().wstring();
+    // The frames saved with F9 are far too big to send (10-20 MB each): the
+    // zip gets small pictures of them, and they stay in Captures.
+    std::wstring frames_text = L"  (no frames: F9 while playing adds them when frame generation is on)\n";
+    if (!frames.empty()) {
+        const std::wstring name = fs::path(frames).filename().wstring();
+        FramePreviews previews;
+        std::wstring why;
+        if (write_frame_previews(frames, (stage / name).wstring(), kMaxPreviewBytes, previews, why)) {
+            frames_text = std::format(L"  {}\\: the {} frames saved with F9 as JPEG pictures ({}x{}, {}quality {}, {})\n",
+                                      name, previews.frames, previews.width, previews.height,
+                                      previews.hdr ? L"HDR tone-mapped to SDR, " : L"", previews.quality,
+                                      megabytes(previews.bytes));
+            frames_text += std::format(L"  The frames themselves ({}) are not in this zip. They stay in Captures\\{} in\n"
+                                       L"  Glasir's folder: keep them, they may be asked for.\n",
+                                       megabytes(previews.source_bytes), name);
+        } else {
+            log(L"bug report: no pictures of the frames: {}", why);
+            frames_text = std::format(L"  (no pictures of the frames: {}; the frames are in Captures\\{})\n", why, name);
+        }
+    }
 
     std::wstring system = std::format(L"{} {} ({})\nMade {}: {}\n\n", widen(GLASIR_NAME), widen(GLASIR_VERSION),
                                       widen(GLASIR_GIT_DESCRIBE), stamp(), in.how);
@@ -239,8 +267,7 @@ bool save_bug_report(const BugReportInput &in, std::wstring &zip, std::wstring &
             system += std::wstring(L"  ") + component_name(c) + L" is not the version this Glasir was tested with\n";
     if (!in.extra.empty()) system += L"\n" + in.extra;
     system += L"\nFiles:\n" + listed;
-    system += frames_name.empty() ? L"  (no frames: F9 while playing adds them when frame generation is on)\n"
-                                  : L"  " + frames_name + L"\\: the frames saved with F9\n";
+    system += frames_text;
     {
         const std::string text = redact(without_bom(narrow(system)));
         std::ofstream out(stage / L"system.txt", std::ios::binary);
@@ -253,11 +280,6 @@ bool save_bug_report(const BugReportInput &in, std::wstring &zip, std::wstring &
     zip = folder + L"\\Glasir-bug-report-" + stamp() + L".zip";
     std::vector<std::wstring> args = {L"-a", L"-c", L"-f", zip, L"-C", stage.wstring()};
     for (const fs::directory_entry &e : fs::directory_iterator(stage, ec)) args.push_back(e.path().filename().wstring());
-    if (!frames_name.empty()) {
-        args.push_back(L"-C");
-        args.push_back(fs::path(frames).parent_path().wstring());
-        args.push_back(frames_name);
-    }
     // Below normal priority: it may run while a game is being played.
     if (!run_tar(args, true, error)) {
         DeleteFileW(zip.c_str());

@@ -151,4 +151,5 @@ Each step tested against the real capture card before the next:
 8. Update check / self-update, bug-report capture, docs. *(done: update
    check in the launcher + `--update`, self-update from the release zip with
    SHA-256 and rollback; F9 / launcher / `--bug-report` save a zip with logs,
-   settings, system and F9 frames; README sections + docs/TROUBLESHOOTING.md)*
+   settings, system and JPEG pictures of the F9 frames (the frames stay in
+   Captures); README sections + docs/TROUBLESHOOTING.md)*

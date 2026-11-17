@@ -2,10 +2,14 @@
 // Checks picking the card's mode, settings parsing, and mpv's command line.
 #include <windows.h>
 #include <shellapi.h>
+#include <wincodec.h>
+#include <wrl/client.h>
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -14,6 +18,7 @@
 #include "components.h"
 #include "devices.h"
 #include "files.h"
+#include "frame_preview.h"
 #include "glasir_version.h"
 #include "gpu.h"
 #include "json.h"
@@ -57,6 +62,59 @@ bool has(const std::vector<std::wstring> &args, const std::wstring &arg) {
         if (a == arg) return true;
     return false;
 }
+
+// A PNG as a frame generation capture writes it: 16 bits a channel (HDR10
+// PQ, R G B A) or 8 (B G R A), every pixel the same but the right half black.
+bool write_png(const std::wstring &path, UINT w, UINT h, bool deep, const UINT16 left[3]) {
+    using Microsoft::WRL::ComPtr;
+    const UINT bytes = deep ? 8 : 4;
+    std::vector<BYTE> pixels(size_t(w) * h * bytes);
+    for (UINT y = 0; y < h; ++y)
+        for (UINT x = 0; x < w; ++x) {
+            BYTE *px = pixels.data() + (size_t(y) * w + x) * bytes;
+            if (deep) {
+                const UINT16 c[4] = {x < w / 2 ? left[0] : UINT16(0), x < w / 2 ? left[1] : UINT16(0),
+                                     x < w / 2 ? left[2] : UINT16(0), 0xFFFF};
+                memcpy(px, c, 8);
+            } else {
+                for (int k = 0; k < 3; ++k) px[k] = x < w / 2 ? BYTE(left[k]) : BYTE(0);
+                px[3] = 255;
+            }
+        }
+    ComPtr<IWICImagingFactory> wic;
+    ComPtr<IWICStream> stream;
+    ComPtr<IWICBitmapEncoder> encoder;
+    ComPtr<IWICBitmapFrameEncode> frame;
+    WICPixelFormatGUID format = deep ? GUID_WICPixelFormat64bppRGBA : GUID_WICPixelFormat32bppBGRA;
+    return SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) &&
+           SUCCEEDED(wic->CreateStream(&stream)) && SUCCEEDED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
+           SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) &&
+           SUCCEEDED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
+           SUCCEEDED(encoder->CreateNewFrame(&frame, nullptr)) && SUCCEEDED(frame->Initialize(nullptr)) &&
+           SUCCEEDED(frame->SetSize(w, h)) && SUCCEEDED(frame->SetPixelFormat(&format)) &&
+           SUCCEEDED(frame->WritePixels(h, w * bytes, UINT(pixels.size()), pixels.data())) &&
+           SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
+}
+
+// The size of an image file and its pixel at (x, y), as B G R.
+bool read_pixel(const std::wstring &path, UINT x, UINT y, UINT &w, UINT &h, BYTE bgr[3]) {
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IWICImagingFactory> wic;
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> source;
+    ComPtr<IWICFormatConverter> converter;
+    const WICRect one{INT(x), INT(y), 1, 1};
+    return SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) &&
+           SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand,
+                                                    &decoder)) &&
+           SUCCEEDED(decoder->GetFrame(0, &source)) && SUCCEEDED(source->GetSize(&w, &h)) &&
+           SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
+           SUCCEEDED(converter->Initialize(source.Get(), GUID_WICPixelFormat24bppBGR, WICBitmapDitherTypeNone, nullptr, 0,
+                                           WICBitmapPaletteTypeCustom)) &&
+           SUCCEEDED(converter->CopyPixels(&one, 3, 3, bgr));
+}
+
+bool near_to(BYTE value, int wanted, int by) { return value >= wanted - by && value <= wanted + by; }
 
 }  // namespace
 
@@ -466,6 +524,50 @@ int main() {
                    "%USERPROFILE%/a {\"p\":\"%USERPROFILE%\\\\b\"}",
                "redact: slashes and JSON's doubled backslashes");
         expect(redact_profile("C:\\Users\\Someone2", L"C:\\") == "C:\\Users\\Someone2", "redact: no real profile");
+    }
+    {
+        // Bug reports: JPEG pictures of a capture's frames, HDR tone-mapped.
+        const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
+        WorkDir work(L"test-previews");
+        const std::wstring from = work.path() + L"\\20260101-120000-000", to = work.path() + L"\\out";
+        CreateDirectoryW(from.c_str(), nullptr);
+        // 203 nits (the reference white) in 10-bit PQ is code 594, repeated into 16 bits.
+        const UINT16 white[3] = {UINT16(594 << 6 | 594 >> 4), UINT16(594 << 6 | 594 >> 4), UINT16(594 << 6 | 594 >> 4)};
+        const UINT16 orange[3] = {20, 128, 240};  // B G R
+        expect(write_png(from + L"\\f01.png", 64, 32, true, white) &&
+                   write_png(from + L"\\between_f01_f02.png", 64, 32, false, orange),
+               "previews: a capture to make them of");
+        FramePreviews p;
+        std::wstring error;
+        const bool made = write_frame_previews(from, to, 20u << 20, p, error);
+        std::error_code ec;
+        const uint64_t size = std::filesystem::file_size(to + L"\\f01.jpg", ec) +
+                              std::filesystem::file_size(to + L"\\between_f01_f02.jpg", ec);
+        expect(made && p.frames == 2 && p.width == 64 && p.height == 32 && p.hdr && p.quality == 90 && !ec &&
+                   p.bytes == size && p.source_bytes > 0,
+               "previews: one JPEG a frame, at the frame's size");
+        UINT w = 0, h = 0;
+        BYTE left[3] = {}, right[3] = {};
+        // The reference white is above the knee: 0.75 + 0.25 * tanh(1) = 0.94 of the SDR white, 248 in sRGB.
+        expect(read_pixel(to + L"\\f01.jpg", 8, 16, w, h, left) && read_pixel(to + L"\\f01.jpg", 56, 16, w, h, right) &&
+                   w == 64 && h == 32 && near_to(left[0], 248, 4) && near_to(left[1], 248, 4) && near_to(left[2], 248, 4) &&
+                   right[0] <= 3 && right[1] <= 3 && right[2] <= 3,
+               "previews: HDR (16-bit PQ) tone-mapped as the screenshot is");
+        expect(read_pixel(to + L"\\between_f01_f02.jpg", 8, 16, w, h, left) && near_to(left[0], 20, 6) &&
+                   near_to(left[1], 128, 6) && near_to(left[2], 240, 6),
+               "previews: SDR (8-bit) as it is");
+        expect(write_frame_previews(from, to, 1, p, error) && p.frames == 2 && p.quality == 60 && p.bytes < size,
+               "previews: a lower quality when they are too big");
+        {
+            std::ofstream bad(from + L"\\f02.png", std::ios::binary);
+            bad << "not a PNG";
+        }
+        expect(!write_frame_previews(from, to, 20u << 20, p, error) && error.find(L"f02.png") != std::wstring::npos &&
+                   !std::filesystem::exists(to),
+               "previews: a frame that cannot be read: none, and why");
+        CreateDirectoryW((work.path() + L"\\empty").c_str(), nullptr);
+        expect(!write_frame_previews(work.path() + L"\\empty", to, 20u << 20, p, error), "previews: no frames, none");
+        if (com) CoUninitialize();
     }
     {
         Settings s;
