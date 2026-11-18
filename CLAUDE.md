@@ -158,7 +158,8 @@
   all (about 9 s). The menu's Picture sends `script-message glasir-picture
   auto|sdr|hdr`; only an 8-bit capture (`GLASIR_PICTURE_LIVE=0`) still quits
   mpv with code 42 to have the card opened in another mode. `video.rtx_hdr`
-  ("RTX HDR for SDR", NVIDIA RTX, Picture = HDR): the signal is watched
+  ("RTX HDR for SDR", NVIDIA RTX, Picture = HDR; off by default, because
+  Picture = HDR is the way out when Automatic misreads): the signal is watched
   there too and SDR goes through mpv's `d3d11vpp=nvidia-true-hdr`, in the
   same filter as VSR when both run; off, everything is HDR whatever the
   picture looks like. Test with `python tools/picture_check.py [--mode hdr]

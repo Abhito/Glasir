@@ -151,12 +151,15 @@ void picture(const MenuFrame &f, const MpvState &mpv) {
             ImGui::PushID("nvidia");
             const int q = ui::choice("Quality", {"Low", "Medium", "High"}, h.nvidia_quality(), column(),
                                      "NVIDIA's model. A larger one is cleaner and takes more GPU time, which adds "
-                                     "delay. High is for 30 fps games.");
+                                     "delay. High is for 30 fps games with DLSS 5 off: with DLSS 5 on, Medium "
+                                     "gives more even frames.");
             ImGui::PopID();
             if (q >= 0) {
                 h.set_nvidia_quality(q);
                 save(f, "framegen", "nvidia_quality", kQuality[q]);
             }
+            // The largest model behind the DLSS 5 pass leaves the real frame little time after it.
+            if (h.nvidia_quality() == 2 && dlss5_on) ui::note("With DLSS 5 on, Medium gives more even frames.");
         } else {
             const int q = ui::choice("Quality", {"High", "Fast"}, fast ? 1 : 0, column(),
                                      "Fast takes about half the GPU time and is a little less clean.");

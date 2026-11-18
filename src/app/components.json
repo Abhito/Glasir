@@ -1,10 +1,10 @@
 {
   "about": "The versions of the downloaded programs this Glasir was tested with (src/app/components.h). Written by tools/pin_components.py from an engine folder's components.ini.",
   "mpv": {
-    "version": "20261113-git-fe753a7824",
-    "url": "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-11-13-fe753a7824/mpv-x86_64-20261113-git-fe753a7824.7z",
-    "sha256": "7c2ed2075a4461df915b4902aba5dcd395a4f65f36c9c8cda30f5f0e50951d0c",
-    "size": 33944303
+    "version": "20261117-git-f92afa75cd",
+    "url": "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-11-17-f92afa75cd/mpv-x86_64-20261117-git-f92afa75cd.7z",
+    "sha256": "4a9e2787d1913ffd923f2c96b474b80c8e804e9d1980c32f5ba8096d75251fb2",
+    "size": 33994669
   },
   "reshade": {
     "version": "6.8.0",

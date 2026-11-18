@@ -232,12 +232,11 @@ mode = auto
 ; What the signal was the last time Glasir watched it (Glasir writes this):
 ; how it starts.
 auto_found = hdr
-; mode = hdr on an NVIDIA RTX GPU. 1: the screen stays in HDR, and when the
-; console sends SDR, NVIDIA RTX Video HDR turns it into HDR (Windows' HDR
-; must be on). Glasir tells SDR from HDR by the picture, as mode = auto
-; does. 0: everything is shown as HDR,
-; whatever the picture looks like.
-rtx_hdr = 1
+; mode = hdr on an NVIDIA RTX GPU. 0: everything is shown as HDR, whatever
+; the picture looks like. 1: the screen stays in HDR, and when the console
+; sends SDR, NVIDIA RTX Video HDR turns it into HDR (Windows' HDR must be
+; on). Glasir then tells SDR from HDR by the picture, as mode = auto does.
+rtx_hdr = 0
 ; The SDR signal's range: limited (most consoles) or full.
 sdr_range = limited
 ; The brightest the console is taken to send, in nits. HDR is shown as it
@@ -281,7 +280,7 @@ method = glasir
 ; Glasir's own: high, or fast (about half the GPU time, a little less clean).
 quality = high
 ; NVIDIA's: low, medium or high. A larger model is cleaner and takes more GPU
-; time; high is for 30 fps games.
+; time; high is for 30 fps games with DLSS 5 off (with it on, medium).
 nvidia_quality = medium
 ; While frame generation is off (F8): 1 = send mpv every frame (lowest
 ; latency), 0 = new frames only.

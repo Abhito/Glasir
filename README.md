@@ -180,12 +180,12 @@ under **More options**.
 HDR needs HDR on in Windows (Settings, Display) too.
 
 **RTX HDR for SDR** (NVIDIA RTX GPUs; under "More options" and in the menu
-once Picture is HDR; on by default): with Picture set to HDR the screen
-stays in HDR, and when the console sends SDR, NVIDIA RTX Video HDR turns it
-into HDR. Glasir tells SDR from HDR by the picture as Automatic does.
-Switch it off to have everything shown as HDR, whatever the picture looks
-like (for a game Glasir takes for SDR by mistake). Automatic does not use
-it: there SDR is shown as SDR.
+once Picture is HDR; off unless you switch it on): with Picture set to HDR
+the screen stays in HDR, and when the console sends SDR, NVIDIA RTX Video
+HDR turns it into HDR. Glasir then tells SDR from HDR by the picture as
+Automatic does. Off, everything is shown as HDR, whatever the picture looks
+like: leave it off for a console whose HDR Automatic takes for SDR.
+Automatic does not use it: there SDR is shown as SDR.
 
 The menu's Picture choices take effect at once when the card is captured in
 10-bit (Automatic or HDR at the start). After a start in SDR with an 8-bit

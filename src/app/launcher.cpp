@@ -91,7 +91,7 @@ struct Choice {
     double fps = 0;
     bool hdr_auto = false;  // SDR or HDR as the signal turns out to be (hdr then says nothing)
     bool hdr = false;
-    bool rtx_hdr = true;    // Picture = HDR on an NVIDIA RTX GPU: an SDR signal through RTX Video HDR
+    bool rtx_hdr = false;   // Picture = HDR on an NVIDIA RTX GPU: an SDR signal through RTX Video HDR
     bool dlss5 = true;
     bool framegen = true;
     bool fast = false;
@@ -548,9 +548,11 @@ void draw(Screen &s) {
             ImGui::PushID("nvidia");
             const int q = ui::choice("Quality", {"Low", "Medium", "High"}, c.nvidia_quality, column(),
                                      "NVIDIA's model. A larger one is cleaner and takes more GPU time, which adds "
-                                     "delay. High is for 30 fps games.");
+                                     "delay. High is for 30 fps games with DLSS 5 off: with DLSS 5 on, Medium "
+                                     "gives more even frames.");
             ImGui::PopID();
             if (q >= 0) c.nvidia_quality = q;
+            if (c.nvidia_quality == 2 && dlss5) dim("With DLSS 5 on, Medium gives more even frames.");
         } else {
             const int q = ui::choice("Quality", {"High", "Fast"}, c.fast ? 1 : 0, column(),
                                      "Fast takes about half the GPU time and is a little less clean.");

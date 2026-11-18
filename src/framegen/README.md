@@ -190,7 +190,8 @@ this add-on's own generator does.
   already has (its multiplier and frame index); as with the motion method,
   provided as is.
 - **Its model.** `VfgQuality` low, medium (the default) or high. A larger
-  model is cleaner and takes more GPU time; high is for 30 fps games.
+  model is cleaner and takes more GPU time; high is for 30 fps games with
+  DLSS 5 off (the menu and the launcher say to take medium with it on).
   Changing it in the menu loads the other model at the next frame.
 - **Cuts.** `VfgAutoCut=1` is the filter's own detection: across a cut it
   shows the earlier frame again, as the motion method does. It also does so

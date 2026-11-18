@@ -197,9 +197,9 @@ int main() {
                    !apply_override(s, L"video.mode=dolby", error),
                "--set video.mode=auto, and what it found last");
         expect(apply_override(s, L"video.mode=hdr", error) && s.hdr && !s.hdr_auto, "back to video.mode=hdr");
-        expect(s.rtx_hdr && apply_override(s, L"video.rtx_hdr=0", error) && !s.rtx_hdr &&
-                   apply_override(s, L"video.rtx_hdr=1", error) && s.rtx_hdr && !apply_override(s, L"video.rtx_hdr=x", error),
-               "video.rtx_hdr: on unless said, 1 or 0");
+        expect(!Settings().rtx_hdr && apply_override(s, L"video.rtx_hdr=1", error) && s.rtx_hdr &&
+                   apply_override(s, L"video.rtx_hdr=0", error) && !s.rtx_hdr && !apply_override(s, L"video.rtx_hdr=x", error),
+               "video.rtx_hdr: off unless said (mode = hdr is the way out when Automatic misreads), 1 or 0");
         expect(apply_override(s, L"capture.fps = 120", error) && s.fps == 120, "--set with spaces");
         expect(apply_override(s, L"Capture.Device=My Card", error) && s.device == L"My Card",
                "--set keeps the value's case");

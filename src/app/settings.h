@@ -25,8 +25,11 @@ struct Settings {
     bool hdr = false;
     bool auto_found_hdr = true;
     // mode = hdr on an NVIDIA RTX GPU: an SDR signal is shown in HDR by RTX
-    // Video HDR (the signal is watched there too). Off: all of it is HDR.
-    bool rtx_hdr = true;
+    // Video HDR (the signal is watched there too). Off, the default: all of
+    // it is HDR - mode = hdr is what the docs tell people to choose when
+    // Automatic takes their console's HDR for SDR, and watching the signal
+    // would bring that back.
+    bool rtx_hdr = false;
     bool sdr_full_range = false;
     int hdr_peak_nits = 1000;
     // How the capture is scaled up to the window (glasir_scaling.lua).
