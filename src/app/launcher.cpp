@@ -29,6 +29,7 @@
 #include "log.h"
 #include "settings.h"
 #include "ui_style.h"
+#include "ui_widgets.h"
 #include "update.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -90,9 +91,13 @@ struct Choice {
     double fps = 0;
     bool hdr_auto = false;  // SDR or HDR as the signal turns out to be (hdr then says nothing)
     bool hdr = false;
+    bool rtx_hdr = true;    // Picture = HDR on an NVIDIA RTX GPU: an SDR signal through RTX Video HDR
     bool dlss5 = true;
     bool framegen = true;
     bool fast = false;
+    bool nvidia = false;     // NVIDIA Video Frame Generation makes the frames in between
+    int nvidia_quality = 1;  // 0 low, 1 medium, 2 high
+    int multiplier = 2;      // frames shown for each of the game's: 2, 3 or 4
     bool audio = true;
     std::wstring audio_device;
     bool borderless = true;
@@ -270,29 +275,23 @@ bool open_window(Window &w) {
 }
 
 // ---------------------------------------------------------------- drawing
+//
+// The window in the look of ui_style.h, with ui_widgets.h's controls: what a
+// player sets for a session at the top (the card, DLSS 5, frame generation),
+// Play under it, and what is set once (scaling, sound, the window, the
+// downloads) behind "More options". What a line is for is in its tooltip; a
+// note stays on screen only where it says something to do.
 
-void heading(const char *text) {
-    ImGui::Dummy(ImVec2(0, ImGui::GetStyle().ItemSpacing.y * 0.5f));
-    ImGuiIO &io = ImGui::GetIO();
-    ImGui::PushFont(io.Fonts->Fonts.Size > 1 ? io.Fonts->Fonts[1] : nullptr, ImGui::GetStyle().FontSizeBase * 0.8f);
-    ImGui::PushStyleColor(ImGuiCol_Text, ui::kGold);
-    ImGui::TextUnformatted(text);
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
-    ImGui::Separator();
-}
+void dim(const std::string &text) { ui::note(text.c_str()); }
 
-void dim(const std::string &text) {
-    ImGui::PushStyleColor(ImGuiCol_Text, ui::kTextDim);
-    ImGui::TextWrapped("%s", text.c_str());
-    ImGui::PopStyleColor();
-}
+// Where a line's control starts, after its label.
+float column() { return ImGui::GetFontSize() * 6.0f; }
 
 // A label in the left column and the widget's start.
 void row(const char *label) {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
-    ImGui::SameLine(ImGui::GetFontSize() * 6.0f);
+    ImGui::SameLine(column());
     ImGui::SetNextItemWidth(-1);
 }
 
@@ -324,6 +323,14 @@ struct BugReport {
     }
 };
 
+// Video super resolution is the GPU's: on another GPU a saved VSR becomes
+// FSR 1 - once the GPU is known (the first frames are drawn before it is
+// found). On every frame, whether the scaling line is shown or not.
+void keep_scaling_possible(Choice &c, const Found *f) {
+    if (c.scaling == Settings::Scaling::Vsr && f && f->gpu.found && std::wstring(vsr_kind(f->gpu)) == L"none")
+        c.scaling = Settings::Scaling::Fsr;
+}
+
 // How a capture smaller than the screen is scaled up.
 void scaling_row(Choice &c, const Found *f) {
     const std::wstring vsr = f ? vsr_kind(f->gpu) : L"none";
@@ -343,7 +350,7 @@ void scaling_row(Choice &c, const Found *f) {
     const char *current = options[0].label;
     for (const Option &o : options)
         if (o.value == c.scaling) current = o.label;
-    if (ImGui::BeginCombo("##scaling", current)) {
+    if (ui::begin_combo("##scaling", current)) {
         for (const Option &o : options) {
             const bool off = o.value == Settings::Scaling::Vsr && vsr == L"none";
             if (off) ImGui::BeginDisabled();
@@ -352,18 +359,13 @@ void scaling_row(Choice &c, const Found *f) {
         }
         ImGui::EndCombo();
     }
-    // Not this GPU - once it is known: the first frames are drawn before the
-    // GPU is found, and would turn a saved VSR into FSR.
-    if (c.scaling == Settings::Scaling::Vsr && f && f->gpu.found && vsr == L"none") c.scaling = Settings::Scaling::Fsr;
+    ui::tooltip("How a capture smaller than the screen is scaled up, before DLSS 5. Video super resolution uses the "
+                "GPU's video engine (FSR 1 where it cannot run); ArtCNN and Anime4K take more GPU time, which DLSS 5 "
+                "and frame generation also need.");
     // A capture as tall as its place on the screen is not scaled at all.
     const int screen_w = GetSystemMetrics(SM_CXSCREEN), screen_h = GetSystemMetrics(SM_CYSCREEN);
     const UINT32 place_h = UINT32(std::min(screen_h, screen_w * 9 / 16));
-    if (c.shown_height && c.shown_height >= place_h)
-        dim("Not used: the capture is as large as its place on the screen.");
-    else if (c.scaling == Settings::Scaling::Vsr)
-        dim("Uses the GPU's video engine; FSR 1 if it cannot run.");
-    else if (c.scaling == Settings::Scaling::Cnn || c.scaling == Settings::Scaling::Anime4k)
-        dim("Takes more GPU time, which DLSS 5 and frame generation also need.");
+    if (c.shown_height && c.shown_height >= place_h) dim("Not used: the capture is as large as its place on the screen.");
 }
 
 struct Screen {
@@ -372,12 +374,14 @@ struct Screen {
     const Found *found = nullptr;
     bool dlss5_installed = false;
     bool dlss5_forced = false;  // glasir.ini: [dlss5] enabled = on (try on any GPU)
+    bool vfg_installed = false;  // NVIDIA Video Frame Generation is downloaded
     std::string versions;  // "mpv 20261031  ·  ReShade 6.8.0  ·  DLSS 5 10.8.0", "" if none
     bool other_versions = false;  // not the ones this Glasir was tested with: Update installs those
     const LauncherExtras *extras = nullptr;
     Release release;  // the newer Glasir, once the update check found one
     BugReport *bug = nullptr;
     float content_height = 0;  // what the window needs, in pixels
+    bool more = false;         // "More options" is open
     LauncherAction action = LauncherAction::Quit;
     bool finished = false;
 };
@@ -390,7 +394,7 @@ void draw(Screen &s) {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    ImGui::PushFont(io.Fonts->Fonts.Size > 1 ? io.Fonts->Fonts[1] : nullptr, ImGui::GetStyle().FontSizeBase * 1.8f);
+    ImGui::PushFont(ui::bold_font(), ImGui::GetStyle().FontSizeBase * 1.8f);
     ImGui::PushStyleColor(ImGuiCol_Text, ui::kGold);
     ImGui::TextUnformatted("Glasir");
     ImGui::PopStyleColor();
@@ -402,7 +406,8 @@ void draw(Screen &s) {
 
     Choice &c = s.c;
     const Found *f = s.found;
-    heading("CAPTURE");
+    ui::section("CAPTURE");
+    ui::begin_card("capture");
     if (!f) {
         dim("Looking for capture cards...");
     } else {
@@ -432,7 +437,7 @@ void draw(Screen &s) {
         const std::string auto_label =
             automatic ? "Automatic (" + utf8(automatic->name) + ")" : std::string("Automatic (none found yet)");
         const std::string current = c.device.empty() ? auto_label : utf8(c.device) + (directshow ? "  (DirectShow)" : "");
-        if (ImGui::BeginCombo("##card", current.c_str())) {
+        if (ui::begin_combo("##card", current.c_str())) {
             if (ImGui::Selectable(auto_label.c_str(), c.device.empty())) c.device.clear();
             // Items are told apart by their place, not their text: two cards
             // can share a name, and ImGui warns about matching IDs.
@@ -452,19 +457,15 @@ void draw(Screen &s) {
         if (directshow) dim("This card works only through DirectShow: no dedup, so no frame generation.");
         if (f->devices.empty() && f->directshow_only.empty()) dim("No capture card found. Plug it in and start Glasir again.");
 
-        row("Picture");
-        if (ImGui::RadioButton("Automatic", c.hdr_auto)) c.hdr_auto = true;
-        ImGui::SameLine();
-        if (ImGui::RadioButton("SDR", !c.hdr_auto && !c.hdr)) c.hdr_auto = c.hdr = false;
-        ImGui::SameLine();
-        if (ImGui::RadioButton("HDR", !c.hdr_auto && c.hdr)) c.hdr_auto = false, c.hdr = true;
-        if (c.hdr_auto)
-            dim(!device || ten_bit_modes
-                    ? "SDR or HDR, as the console sends it: Glasir tells from the picture, in the card's 10-bit modes."
-                    : "This card has no 10-bit mode: SDR.");
-        else
-            dim(c.hdr ? "HDR needs HDR on the console. Only the card's HDR (10-bit) modes are listed."
-                      : "Modes marked HDR can also be played in HDR.");
+        const int picture = ui::choice(
+            "Picture", {"Automatic", "SDR", "HDR"}, c.hdr_auto ? 0 : c.hdr ? 2 : 1, column(),
+            "Automatic: SDR or HDR as the console sends it. Glasir tells from the picture, in the card's 10-bit modes, "
+            "and follows it while you play.\nSDR also offers the card's 8-bit modes, which are often larger or faster.\n"
+            "HDR lists only the card's HDR (10-bit) modes and keeps the screen in HDR. With an NVIDIA RTX GPU an SDR "
+            "signal is then turned into HDR (More options).");
+        if (picture == 0) c.hdr_auto = true;
+        else if (picture > 0) c.hdr_auto = false, c.hdr = picture == 2;
+        if (c.hdr_auto && device && !ten_bit_modes) dim("This card has no 10-bit mode: SDR.");
 
         const auto modes = modes_for(device, ten_bit);
         bool mode_ok = c.width == 0;
@@ -479,7 +480,7 @@ void draw(Screen &s) {
         c.shown_height = c.width ? c.height : (picked ? picked->height : 0);
         row("Mode");
         const std::string mode_label = c.width ? mode_text(c.width, c.height, c.fps) : auto_mode;
-        if (ImGui::BeginCombo("##mode", mode_label.c_str())) {
+        if (ui::begin_combo("##mode", mode_label.c_str())) {
             const bool auto_hdr = !ten_bit && picked && has_hdr(device, picked->width, picked->height, picked->fps);
             if (mode_item(auto_mode, c.width == 0, auto_hdr)) c.width = c.height = 0, c.fps = 0;
             int id = 0;
@@ -497,14 +498,17 @@ void draw(Screen &s) {
         }
         if (device && modes.empty()) dim(ten_bit ? "This card has no HDR mode Glasir can read." : "This card has no mode Glasir can read; mpv opens it through DirectShow.");
     }
+    ui::end_card();
 
-    heading("ENHANCEMENTS");
+    ui::section("ENHANCEMENTS");
+    ui::begin_card("enhancements");
     const bool nr_gpu = f && dlss5_gpu(f->gpu);
     const bool forced = s.dlss5_forced;
-    if (!s.dlss5_installed || !(nr_gpu || forced)) ImGui::BeginDisabled();
-    bool dlss5 = c.dlss5 && s.dlss5_installed && (nr_gpu || forced);
-    if (ImGui::Checkbox("DLSS 5 neural rendering", &dlss5)) c.dlss5 = dlss5;
-    if (!s.dlss5_installed || !(nr_gpu || forced)) ImGui::EndDisabled();
+    const bool nr_ready = s.dlss5_installed && (nr_gpu || forced);
+    if (!nr_ready) ImGui::BeginDisabled();
+    bool dlss5 = c.dlss5 && nr_ready;
+    if (ui::toggle("DLSS 5 neural rendering", &dlss5)) c.dlss5 = dlss5;
+    if (!nr_ready) ImGui::EndDisabled();
     if (f && !nr_gpu && !forced)
         dim("Needs an NVIDIA RTX 30, 40 or 50 series GPU" +
             (f->gpu.found ? " (this PC: " + utf8(f->gpu.name) + ")." : std::string(".")));
@@ -515,85 +519,71 @@ void draw(Screen &s) {
             s.finished = true;
         }
     }
-    ImGui::Checkbox("Frame generation (doubles the frame rate)", &c.framegen);
+    ui::toggle("Frame generation", &c.framegen,
+               "Draws a frame between each two of the game's, so 30 fps looks like 60 and 60 like 120, when the "
+               "display can show it. The game reacts no faster.");
     if (c.framegen) {
-        ImGui::Indent();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Quality");
-        ImGui::SameLine();
-        if (ImGui::RadioButton("High", !c.fast)) c.fast = false;
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Fast (less GPU)", c.fast)) c.fast = true;
-        ImGui::Unindent();
-    }
-    scaling_row(c, f);
-
-    heading("SOUND");
-    ImGui::Checkbox("Play the card's sound", &c.audio);
-    if (c.audio && f) {
-        row("Input");
-        const std::string own = "The card's own (automatic)";
-        const std::string current = c.audio_device.empty() ? own : utf8(c.audio_device);
-        if (ImGui::BeginCombo("##audio", current.c_str())) {
-            if (ImGui::Selectable(own.c_str(), c.audio_device.empty())) c.audio_device.clear();
-            int id = 0;
-            for (const auto &a : f->audio) {
-                ImGui::PushID(id++);
-                if (ImGui::Selectable(utf8(a.name).c_str(), a.name == c.audio_device)) c.audio_device = a.name;
-                ImGui::PopID();
+        const int rate = ui::choice("Rate", {"2x", "3x", "4x"}, c.multiplier - 2, column(),
+                                    "How many frames are shown for each of the game's: 2x makes 30 fps look like 60, "
+                                    "3x like 90, 4x like 120. Where the display or the GPU cannot keep up with that "
+                                    "many, the highest that holds steady is shown; the menu (Tab) says when.");
+        if (rate >= 0) c.multiplier = rate + 2;
+        // NVIDIA's frame generation in place of Glasir's own, where the GPU runs it.
+        const bool nvidia_gpu = f && vfg_gpu(f->gpu);
+        if (nvidia_gpu) {
+            const int by = ui::choice("Made by", {"Glasir", "NVIDIA"}, c.nvidia ? 1 : 0, column(),
+                                      "Glasir: its own frame generation, on any GPU.\nNVIDIA: NVIDIA Video Frame "
+                                      "Generation, on an RTX 40 or 50 series GPU. A separate download, under NVIDIA's "
+                                      "licences; Glasir's own makes the frames where it cannot run.");
+            if (by >= 0) c.nvidia = by == 1;
+        }
+        if (nvidia_gpu && c.nvidia && !s.vfg_installed) {
+            dim("NVIDIA Video Frame Generation is not downloaded yet (about 440 MB). Until it is, Glasir's own makes "
+                "the frames.");
+            if (ImGui::Button("Download it")) {
+                s.action = LauncherAction::SetupVfg;
+                s.finished = true;
             }
-            ImGui::EndCombo();
+        } else if (nvidia_gpu && c.nvidia) {
+            ImGui::PushID("nvidia");
+            const int q = ui::choice("Quality", {"Low", "Medium", "High"}, c.nvidia_quality, column(),
+                                     "NVIDIA's model. A larger one is cleaner and takes more GPU time, which adds "
+                                     "delay. High is for 30 fps games.");
+            ImGui::PopID();
+            if (q >= 0) c.nvidia_quality = q;
+        } else {
+            const int q = ui::choice("Quality", {"High", "Fast"}, c.fast ? 1 : 0, column(),
+                                     "Fast takes about half the GPU time and is a little less clean.");
+            if (q >= 0) c.fast = q == 1;
         }
     }
+    ui::end_card();
+    keep_scaling_possible(c, f);
 
-    heading("WINDOW");
-    row("Show as");
-    const char *shown = c.fullscreen ? "Full screen" : c.borderless ? "Borderless (fills the screen)" : "A window";
-    if (ImGui::BeginCombo("##window", shown)) {
-        if (ImGui::Selectable("Full screen", c.fullscreen)) c.borderless = c.fullscreen = true;
-        if (ImGui::Selectable("Borderless (fills the screen)", c.borderless && !c.fullscreen))
-            c.borderless = true, c.fullscreen = false;
-        if (ImGui::Selectable("A window", !c.borderless)) c.borderless = c.fullscreen = false;
-        ImGui::EndCombo();
-    }
-    if (c.fullscreen) dim("mpv's own full screen, as f or a double-click switches it.");
-    if (c.borderless && !c.fullscreen) {
-        ImGui::Checkbox("Skip the black bars", &c.skip_bars);
-        dim(c.skip_bars ? "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
-                          "generation work on the picture only. On some PCs Windows then composes the window and "
-                          "frame generation falls short of double: check the fps in the menu (Tab)."
-                        : "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
-                          "generation skip the bars, a lighter load.");
-    }
-    ImGui::Checkbox("Show this window when Glasir starts", &c.show);
-    if (!c.show) dim("Glasir then plays at once. Hold Shift while starting it to see this window.");
-
-    ImGui::Dummy(ImVec2(0, ImGui::GetStyle().ItemSpacing.y));
-    const float button_h = ImGui::GetFrameHeight() * 1.8f;
+    ImGui::Dummy(ImVec2(0, ImGui::GetStyle().ItemSpacing.y * 0.5f));
+    const float button_h = ImGui::GetFrameHeight() * 1.7f;
     ImGui::PushStyleColor(ImGuiCol_Button, ui::kGold);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.80f, 0.36f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ui::kGoldBright);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.75f, 0.58f, 0.18f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.08f, 0.07f, 0.05f, 1.0f));
-    ImGui::PushFont(io.Fonts->Fonts.Size > 1 ? io.Fonts->Fonts[1] : nullptr, ImGui::GetStyle().FontSizeBase * 1.15f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ui::kOnGold);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, ImGui::GetStyle().FrameRounding * 1.5f);
+    ImGui::PushFont(ui::bold_font(), ImGui::GetStyle().FontSizeBase * 1.15f);
     if (ImGui::Button("Play", ImVec2(-1, button_h))) {
         s.action = LauncherAction::Play;
         s.finished = true;
     }
     ImGui::PopFont();
+    ImGui::PopStyleVar();
     ImGui::PopStyleColor(4);
-    dim("While playing, Tab opens the menu.");
-    ImGui::AlignTextToFramePadding();
-    dim(s.versions.empty() ? "mpv and ReShade are downloaded when you press Play." : s.versions);
-    if (!s.versions.empty()) {
-        ImGui::SameLine();
-        if (ImGui::SmallButton(s.other_versions ? "Update" : "Download again")) {
+    dim(s.versions.empty() ? "mpv and ReShade are downloaded when you press Play. While playing, Tab opens the menu."
+                           : "While playing, Tab opens the menu.");
+
+    // What asks for a decision stays in sight: other versions installed, a newer Glasir.
+    if (!s.versions.empty() && s.other_versions) {
+        ui::warn("This Glasir was tested with other versions of the programs it runs on.");
+        if (ImGui::SmallButton("Update")) {
             s.action = LauncherAction::Setup;
             s.finished = true;
-        }
-        if (s.other_versions) {
-            ImGui::PushStyleColor(ImGuiCol_Text, ui::kGold);
-            ImGui::TextWrapped("This Glasir was tested with other versions of these. Update installs them.");
-            ImGui::PopStyleColor();
         }
     }
     if (s.extras && s.extras->update && s.extras->update->state() == UpdateCheck::State::Available) {
@@ -613,20 +603,75 @@ void draw(Screen &s) {
                 ShellExecuteW(nullptr, L"open", s.release.page.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
     }
-    if (s.extras && s.extras->bug_report && s.bug) {
-        const int state = s.bug->state.load();
-        ImGui::AlignTextToFramePadding();
-        if (state == BugReport::Saving) {
-            dim("Saving a bug report...");
-        } else {
-            if (ImGui::SmallButton("Save a bug report")) s.bug->start(s.extras->bug_report);
+
+    // What is set once: scaling, the sound, the window, the downloads, a bug report.
+    if (ui::disclosure("More options", &s.more)) {
+        ui::begin_card("more");
+        scaling_row(c, f);
+        // NVIDIA RTX Video HDR, in the GPU's video processor (as its super resolution).
+        if (!c.hdr_auto && c.hdr && f && std::wstring(vsr_kind(f->gpu)) == L"nvidia")
+            ui::toggle("RTX HDR for SDR", &c.rtx_hdr,
+                       "With Picture set to HDR: when the console sends SDR, NVIDIA RTX Video HDR turns it into HDR "
+                       "and the screen stays in HDR. Glasir tells SDR from HDR by the picture. HDR must be on in "
+                       "Windows. Off: everything is shown as HDR.");
+        ui::divider();
+        ui::toggle("Play the card's sound", &c.audio);
+        if (c.audio && f) {
+            row("Input");
+            const std::string own = "The card's own (automatic)";
+            const std::string current = c.audio_device.empty() ? own : utf8(c.audio_device);
+            if (ui::begin_combo("##audio", current.c_str())) {
+                if (ImGui::Selectable(own.c_str(), c.audio_device.empty())) c.audio_device.clear();
+                int id = 0;
+                for (const auto &a : f->audio) {
+                    ImGui::PushID(id++);
+                    if (ImGui::Selectable(utf8(a.name).c_str(), a.name == c.audio_device)) c.audio_device = a.name;
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+        }
+        ui::divider();
+        const int shown = ui::choice("Show as", {"Full screen", "Borderless", "Window"}, c.fullscreen ? 0 : c.borderless ? 1 : 2,
+                                     column(),
+                                     "Full screen: mpv's own, as f or a double-click switches it.\nBorderless: a window "
+                                     "without a frame that fills the screen.");
+        if (shown == 0) c.borderless = c.fullscreen = true;
+        else if (shown == 1) c.borderless = true, c.fullscreen = false;
+        else if (shown == 2) c.borderless = c.fullscreen = false;
+        if (c.borderless && !c.fullscreen)
+            ui::toggle("Skip the black bars", &c.skip_bars,
+                       "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
+                       "generation work on the picture only, a lighter load. On some PCs Windows then composes the "
+                       "window and frame generation falls short of double: check the fps in the menu (Tab).");
+        ui::toggle("Open this window when Glasir starts", &c.show);
+        if (!c.show) dim("Glasir then plays at once. Hold Shift while starting it to see this window.");
+        ui::end_card();
+
+        if (!s.versions.empty()) {
+            ImGui::AlignTextToFramePadding();
+            dim(s.versions);
             ImGui::SameLine();
-            if (state == BugReport::Saved)
-                dim("Saved in \"Bug reports\" (logs, settings and the PC; no user name).");
-            else if (state == BugReport::Failed)
-                dim("Could not save it: " + narrow(s.bug->error));
-            else
-                dim("F9 while playing adds pictures of the frames on screen.");
+            if (ImGui::SmallButton("Download again")) {
+                s.action = LauncherAction::Setup;
+                s.finished = true;
+            }
+        }
+        if (s.extras && s.extras->bug_report && s.bug) {
+            const int state = s.bug->state.load();
+            ImGui::AlignTextToFramePadding();
+            if (state == BugReport::Saving) {
+                dim("Saving a bug report...");
+            } else {
+                if (ImGui::SmallButton("Save a bug report")) s.bug->start(s.extras->bug_report);
+                ImGui::SameLine();
+                if (state == BugReport::Saved)
+                    dim("Saved in \"Bug reports\" (logs, settings and the PC; no user name).");
+                else if (state == BugReport::Failed)
+                    dim("Could not save it: " + narrow(s.bug->error));
+                else
+                    dim("F9 while playing adds pictures of the frames on screen.");
+            }
         }
     }
     s.content_height = ImGui::GetCursorPosY() + ImGui::GetStyle().WindowPadding.y;
@@ -645,9 +690,14 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool nr_gp
     }
     if (c.hdr_auto != o.hdr_auto || (!c.hdr_auto && c.hdr != o.hdr))
         v.push_back({L"video", L"mode", c.hdr_auto ? L"auto" : c.hdr ? L"hdr" : L"sdr"});
+    if (c.rtx_hdr != o.rtx_hdr) v.push_back({L"video", L"rtx_hdr", c.rtx_hdr ? L"1" : L"0"});
     if (c.dlss5 != o.dlss5) v.push_back({L"dlss5", L"enabled", c.dlss5 ? (nr_gpu ? L"auto" : L"on") : L"off"});
     if (c.framegen != o.framegen) v.push_back({L"framegen", L"enabled", c.framegen ? L"1" : L"0"});
     if (c.fast != o.fast) v.push_back({L"framegen", L"quality", c.fast ? L"fast" : L"high"});
+    if (c.multiplier != o.multiplier) v.push_back({L"framegen", L"multiplier", std::to_wstring(c.multiplier)});
+    if (c.nvidia != o.nvidia) v.push_back({L"framegen", L"method", c.nvidia ? L"nvidia" : L"glasir"});
+    if (c.nvidia_quality != o.nvidia_quality)
+        v.push_back({L"framegen", L"nvidia_quality", c.nvidia_quality == 0 ? L"low" : c.nvidia_quality == 2 ? L"high" : L"medium"});
     if (c.audio != o.audio) v.push_back({L"audio", L"enabled", c.audio ? L"1" : L"0"});
     if (c.audio_device != o.audio_device) v.push_back({L"audio", L"device", c.audio_device});
     if (c.borderless != o.borderless || c.fullscreen != o.fullscreen)
@@ -686,9 +736,13 @@ Choice from(const Settings &s) {
     c.fps = s.fps;
     c.hdr_auto = s.hdr_auto;
     c.hdr = s.hdr;
+    c.rtx_hdr = s.rtx_hdr;
     c.dlss5 = s.dlss5 != Settings::Dlss5::Off;
     c.framegen = s.framegen;
     c.fast = s.framegen_fast;
+    c.nvidia = s.framegen_nvidia;
+    c.nvidia_quality = s.nvidia_quality;
+    c.multiplier = s.framegen_multiplier;
     c.audio = s.audio;
     c.audio_device = s.audio_device;
     c.borderless = s.borderless;
@@ -743,8 +797,9 @@ LauncherAction run_launcher(const std::wstring &settings_path, const std::wstrin
     Screen screen{from(settings), from(settings)};
     screen.dlss5_installed = component_installed(engine_dir, Component::Dlss5);
     screen.dlss5_forced = settings.dlss5 == Settings::Dlss5::On;
+    screen.vfg_installed = component_installed(engine_dir, Component::Vfg);
     screen.versions = versions_line(engine_dir);
-    for (Component c : {Component::Mpv, Component::ReShade, Component::Dlss5})
+    for (Component c : {Component::Mpv, Component::ReShade, Component::Dlss5, Component::Vfg})
         screen.other_versions = screen.other_versions || (component_installed(engine_dir, c) && !component_as_tested(engine_dir, c));
     screen.extras = &extras;
     screen.bug = &bug;

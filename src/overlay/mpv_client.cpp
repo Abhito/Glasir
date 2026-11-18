@@ -13,7 +13,7 @@ namespace {
 // What the menu follows; the ids are the indexes.
 const char *const kProperties[] = {
     "volume", "mute", "fullscreen", "user-data/glasir/audio-boost", "user-data/glasir/audio-delay", "width", "height",
-    "user-data/glasir/scaling", "osd-dimensions",
+    "user-data/glasir/scaling", "osd-dimensions", "user-data/glasir/signal", "user-data/glasir/rtx-hdr",
 };
 
 int to_int(const Json &v, int fallback) {
@@ -158,6 +158,8 @@ void MpvClient::on_line(const std::string &line) {
         state_.osd = {field("w"), field("h"), field("ml"), field("mt"), field("mr"), field("mb")};
         break;
     }
+    case 9: state_.signal = data && data->is(Json::Type::String) ? data->string() : ""; break;
+    case 10: state_.rtx_hdr = data && data->is(Json::Type::String) ? data->string() : ""; break;
     default: break;
     }
 }

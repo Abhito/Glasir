@@ -25,9 +25,15 @@ namespace glasir::overlay {
 
 // Why frame generation is not doubling the frame rate just now, if it is not.
 struct FramegenStatus {
-    enum Kind { Running, Paused, TooFast } kind = Running;
+    // 3x and 4x that do not reach their rate - Fewer: the display shows no
+    // more than `frames` for each of the source's. Behind: the GPU has no time
+    // for more than `frames`. Short: frames are being left out.
+    enum Kind { Running, Paused, TooFast, Fewer, Behind, Short } kind = Running;
     double seconds_left = 0;  // Paused: until it tries again
-    int display_hz = 0;       // TooFast: the most the display shows
+    int display_hz = 0;       // TooFast, Fewer: the most the display shows
+    int frames = 0;           // Fewer, Behind: how many it is
+    int wanted = 0;           // Fewer, Behind, Short: how many were chosen
+    double fps = 0, target_fps = 0;  // Short: what reaches the screen, and what was chosen
 };
 
 // What the add-on around the menu does (frame generation).
@@ -37,6 +43,16 @@ struct Host {
     void (*set_framegen_enabled)(bool on) = nullptr;
     bool (*framegen_fast)() = nullptr;
     void (*set_framegen_fast)(bool fast) = nullptr;
+    // 2, 3 or 4 frames shown for each of the source's.
+    int (*multiplier)() = nullptr;
+    void (*set_multiplier)(int frames) = nullptr;
+    // NVIDIA Video Frame Generation in place of the add-on's own generator.
+    bool (*nvidia_offered)() = nullptr;         // it is installed
+    bool (*framegen_nvidia)() = nullptr;        // it is chosen
+    void (*set_framegen_nvidia)(bool on) = nullptr;
+    int (*nvidia_quality)() = nullptr;          // 0 low, 1 medium, 2 high
+    void (*set_nvidia_quality)(int quality) = nullptr;
+    int (*nvidia_state)() = nullptr;            // 1 = it makes the frames, 0 = not started yet, -1 = it could not
     // Frames per second over the last seconds: from the source, real and
     // generated as presented.
     void (*rates)(double &source, double &real, double &generated) = nullptr;

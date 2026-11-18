@@ -91,6 +91,9 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         if (l == L"sdr") s.auto_found_hdr = false;
         else if (l == L"hdr") s.auto_found_hdr = true;
         else return bad(L"sdr or hdr");
+    } else if (name == L"video.rtx_hdr") {
+        if (!parse_bool(value, b)) return bad(L"1 or 0");
+        s.rtx_hdr = b;
     } else if (name == L"video.sdr_range") {
         const std::wstring l = lower(value);
         if (l == L"limited") s.sdr_full_range = false;
@@ -124,6 +127,20 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         if (l == L"high") s.framegen_fast = false;
         else if (l == L"fast") s.framegen_fast = true;
         else return bad(L"high or fast");
+    } else if (name == L"framegen.multiplier") {
+        if (!parse_int(value, 2, 4, n)) return bad(L"2, 3 or 4");
+        s.framegen_multiplier = int(n);
+    } else if (name == L"framegen.method") {
+        const std::wstring l = lower(value);
+        if (l == L"glasir") s.framegen_nvidia = false;
+        else if (l == L"nvidia") s.framegen_nvidia = true;
+        else return bad(L"glasir or nvidia");
+    } else if (name == L"framegen.nvidia_quality") {
+        const std::wstring l = lower(value);
+        if (l == L"low") s.nvidia_quality = 0;
+        else if (l == L"medium") s.nvidia_quality = 1;
+        else if (l == L"high") s.nvidia_quality = 2;
+        else return bad(L"low, medium or high");
     } else if (name == L"framegen.all_frames_when_off") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.all_frames_when_off = b;
@@ -207,12 +224,20 @@ path = auto
 [video]
 ; auto, sdr or hdr. auto: Glasir captures in the card's 10-bit (P010) mode,
 ; tells from the picture whether the console sends SDR or HDR, and follows it
-; when that changes (the picture starts again); a card without a 10-bit mode
-; is SDR. sdr and hdr say it yourself: hdr needs a 10-bit mode and HDR on the
-; console, sdr also offers the card's 8-bit modes (often larger or faster).
+; when that changes (while playing, within a second or so); a card without a
+; 10-bit mode is SDR. sdr and hdr say it yourself: hdr needs a 10-bit mode
+; and HDR on the console, sdr also offers the card's 8-bit modes (often
+; larger or faster).
 mode = auto
-; What auto found the last time (Glasir writes this): how it starts.
+; What the signal was the last time Glasir watched it (Glasir writes this):
+; how it starts.
 auto_found = hdr
+; mode = hdr on an NVIDIA RTX GPU. 1: the screen stays in HDR, and when the
+; console sends SDR, NVIDIA RTX Video HDR turns it into HDR (Windows' HDR
+; must be on). Glasir tells SDR from HDR by the picture, as mode = auto
+; does. 0: everything is shown as HDR,
+; whatever the picture looks like.
+rtx_hdr = 1
 ; The SDR signal's range: limited (most consoles) or full.
 sdr_range = limited
 ; The brightest the console is taken to send, in nits. HDR is shown as it
@@ -242,8 +267,22 @@ dedup_keepalive_ms = 200
 ; display can show it. Needs dedup = 1 and ReShade. F8 toggles it while playing;
 ; the menu (Tab) switches it and keeps the choice here.
 enabled = 1
-; high, or fast (about half the GPU time, a little less clean).
+; How many frames are shown for each of the game's: 2 (30 fps looks like 60),
+; 3 or 4. When the display cannot show that many, or the GPU cannot finish
+; them in time, the highest that holds steady is used (the menu says so).
+; 3 and 4 are provided as is and are not recommended: every generated
+; frame takes GPU time and adds delay, and more of what is shown is made up.
+; They are there for players who want them.
+multiplier = 2
+; Who makes the frames in between: glasir (Glasir's own, on any GPU) or
+; nvidia (NVIDIA Video Frame Generation, on an RTX 40 or 50 series GPU: the
+; window offers its download; Glasir's own makes them where it cannot run).
+method = glasir
+; Glasir's own: high, or fast (about half the GPU time, a little less clean).
 quality = high
+; NVIDIA's: low, medium or high. A larger model is cleaner and takes more GPU
+; time; high is for 30 fps games.
+nvidia_quality = medium
 ; While frame generation is off (F8): 1 = send mpv every frame (lowest
 ; latency), 0 = new frames only.
 all_frames_when_off = 1

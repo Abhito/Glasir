@@ -13,7 +13,8 @@
 //   Glasir.exe --input-raw FILE|- [--raw-format nv12|p010|yuy2|uyvy] --set capture.width=W ...
 //   Glasir.exe --list
 //   Glasir.exe --version
-//   Glasir.exe --setup [--components mpv,reshade,dlss5] [--newest] [--no-dialogs]
+//   Glasir.exe --setup [--components mpv,reshade,dlss5,vfg] [--newest] [--no-dialogs]
+//                      [--accept-nvidia-licence]
 //   Glasir.exe --update [--no-dialogs]
 //   Glasir.exe --update-from Glasir-x.y.z.zip [--no-dialogs]
 //   Glasir.exe --bug-report [--no-dialogs]
@@ -32,6 +33,9 @@
 // does the same when mpv or ReShade is missing. What is downloaded is the
 // version of each this Glasir was tested with (components.h); --newest takes
 // the newest instead, to try before it is made the tested one.
+// vfg is NVIDIA Video Frame Generation: never downloaded unasked. The window
+// offers it and shows NVIDIA's licences first; --no-dialogs takes it only with
+// --accept-nvidia-licence, which says the user has read and accepts them.
 //
 // --update installs the newest Glasir from its GitHub releases if it is
 // newer (update.h); --update-from installs a release zip from disk. The
@@ -95,6 +99,7 @@ struct Args {
     bool version = false;
     bool setup = false;
     bool newest = false;  // --setup: the newest versions, not the tested ones
+    bool accept_nvidia = false;  // --setup --components vfg without a window: NVIDIA's licences are accepted
     bool update = false;
     bool bug_report = false;
     bool from_launcher = false;  // setup asked for in the launcher: it comes back after
@@ -160,6 +165,8 @@ bool parse_args(Args &a, std::wstring &error) {
             a.setup = true;
         } else if (arg == L"--newest") {
             a.newest = true;
+        } else if (arg == L"--accept-nvidia-licence") {
+            a.accept_nvidia = true;
         } else if (arg == L"--update") {
             a.update = true;
         } else if (arg == L"--update-from") {
@@ -391,7 +398,6 @@ struct Source {
 
     bool raw = true;
     bool hdr_available = false;  // the card has a 10-bit mode (P010) Glasir can read: the menu offers HDR
-    bool watch_signal = false;   // video.mode = auto with a 10-bit capture: SDR or HDR is told from the picture
     // Media Foundation
     ComPtr<IMFMediaSource> source;
     ComPtr<IMFSourceReader> reader;
@@ -428,10 +434,8 @@ bool open_source(const Args &args, Settings &s, Source &src) {
             report(L"Unknown --raw-format " + args.raw_format + L" (nv12, p010, yuy2 or uyvy).");
             return false;
         }
-        if (s.hdr_auto) {
-            src.watch_signal = src.layout.format == PixelFormat::P010;
-            s.hdr = src.watch_signal && s.auto_found_hdr;
-        }
+        // A 10-bit input is shown as what the signal was found to be last time.
+        if (s.hdr_auto) s.hdr = src.layout.format == PixelFormat::P010 && s.auto_found_hdr;
         src.raw_owned = args.input_raw != L"-";
         src.raw_input = src.raw_owned ? CreateFileW(args.input_raw.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                                     OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr)
@@ -483,7 +487,6 @@ bool open_source(const Args &args, Settings &s, Source &src) {
                 ten_bit.hdr = true;
                 if (const auto m = choose_mode(device->modes, ten_bit)) {
                     mode = m;
-                    src.watch_signal = true;
                     s.hdr = s.auto_found_hdr;
                 } else {
                     log(L"video.mode = auto: \"{}\" has no 10-bit mode at {}: SDR", device->name, request_text(s));
@@ -640,6 +643,8 @@ SetupResult setup(const Args &args, const std::wstring &dir, const std::wstring 
         if (args.components.empty()) {
             which = {Component::Mpv, Component::ReShade};
             if (dlss5_default) which.push_back(Component::Dlss5);
+            // Asked for before, with NVIDIA's licences accepted then.
+            if (component_installed(engine, Component::Vfg)) which.push_back(Component::Vfg);
         }
         for (size_t at = 0; at < args.components.size();) {
             size_t comma = args.components.find(L',', at);
@@ -649,8 +654,16 @@ SetupResult setup(const Args &args, const std::wstring &dir, const std::wstring 
             if (name == L"mpv") which.push_back(Component::Mpv);
             else if (name == L"reshade") which.push_back(Component::ReShade);
             else if (name == L"dlss5") which.push_back(Component::Dlss5);
-            else {
-                report(L"Unknown component " + name + L" (mpv, reshade or dlss5).");
+            else if (name == L"vfg") {
+                if (!args.accept_nvidia) {
+                    report(L"vfg is NVIDIA Video Frame Generation, under NVIDIA's licences (the NVIDIA Software License "
+                           L"Agreement, the Product-Specific Terms for NVIDIA AI Products and the NVIDIA Open Model "
+                           L"License, on nvidia.com/en-us/agreements). Add --accept-nvidia-licence if you accept them.");
+                    return SetupResult::Failed;
+                }
+                which.push_back(Component::Vfg);
+            } else {
+                report(L"Unknown component " + name + L" (mpv, reshade, dlss5 or vfg).");
                 return SetupResult::Failed;
             }
         }
@@ -665,6 +678,10 @@ SetupResult setup(const Args &args, const std::wstring &dir, const std::wstring 
             return args.setup || !component_installed(engine, Component::Mpv) ? SetupResult::Stop : SetupResult::Play;
         }
         which = *chosen;
+        // Asked for before, with NVIDIA's licences accepted then: kept up to date with the rest
+        // (435 MB: only when it is not the version this Glasir was tested with).
+        if (component_installed(engine, Component::Vfg) && !component_as_tested(engine, Component::Vfg))
+            which.push_back(Component::Vfg);
     }
 
     std::wstring error;
@@ -713,14 +730,27 @@ void keep_changes(const MpvWatch &watch, const std::wstring &settings_path) {
 }
 
 // mpv's exit code when the in-game menu asks Glasir to start the picture
-// again (after it changed glasir.ini, e.g. SDR to HDR).
+// again (after it changed glasir.ini to something that needs the card opened
+// in another mode: an 8-bit SDR capture to HDR or Automatic).
 constexpr DWORD kRestartCode = 42;
-// Said on screen once the picture is back, when Glasir restarted it itself.
-std::wstring g_restart_toast;
-// video.mode = auto: what the signal turned out to be, for the start that
-// follows (also kept in glasir.ini for the next time; this does not depend
-// on the file being written, or on a --set that says otherwise).
+// What the signal turned out to be while Glasir followed it, for the start
+// that follows (also kept in glasir.ini for the next time; this does not
+// depend on the file being written, or on a --set that says otherwise).
 std::optional<bool> g_found_hdr;
+
+// glasir.ini's video.mode. The menu's Picture changes it while playing.
+enum class PictureMode { Auto, Sdr, Hdr };
+
+// How a 10-bit capture is shown: Automatic as the signal is found to be;
+// HDR with RTX Video HDR likewise, the SDR signal turned into HDR; else as
+// the mode says, whatever the picture looks like.
+Picture picture_for(PictureMode mode, bool rtx, bool found_hdr) {
+    switch (mode) {
+    case PictureMode::Auto: return {found_hdr, false};
+    case PictureMode::Sdr: return {false, false};
+    default: return rtx ? Picture{found_hdr, !found_hdr} : Picture{true, false};
+    }
+}
 
 // F9 while playing: the frame generation add-on saves the frames on screen,
 // then asks for the rest of the report with "script-message
@@ -831,7 +861,7 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     case SetupResult::Failed: return 1;
     }
     for (const auto &line : installed_versions(engine)) log(L"{}", line);
-    for (Component c : {Component::Mpv, Component::ReShade, Component::Dlss5})
+    for (Component c : {Component::Mpv, Component::ReShade, Component::Dlss5, Component::Vfg})
         if (component_installed(engine, c) && !component_as_tested(engine, c))
             log(L"{} is not the version this Glasir was tested with (Update in Glasir's window installs it)",
                 component_name(c));
@@ -849,6 +879,8 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
             return 2;
         }
     if (g_found_hdr) s.auto_found_hdr = *g_found_hdr;
+    // As glasir.ini says; open_source makes s.hdr what the frames are shown as.
+    PictureMode mode = s.hdr_auto ? PictureMode::Auto : s.hdr ? PictureMode::Hdr : PictureMode::Sdr;
 
     MpvPlan plan;
     plan.mpv_exe = engine + L"\\mpv.exe";
@@ -872,6 +904,11 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
         write_reshade_config(engine, s, loaded, dlss5);
         log(L"ReShade: on; frame generation {}{}", s.framegen ? L"on" : L"off",
             s.framegen && !s.dedup ? L" but needs dedup = 1: it stays off" : L"");
+        if (s.framegen && s.framegen_nvidia)
+            log(L"frame generation by NVIDIA Video Frame Generation{}",
+                !component_installed(engine, Component::Vfg)
+                    ? L": not downloaded (Glasir's window offers it), Glasir's own makes the frames"
+                    : !vfg_gpu(gpu) ? L": it needs an RTX 40 or 50 series GPU, Glasir's own makes the frames" : L"");
         std::wstring why;
         if (!installed)
             why = L" (not downloaded; \"Glasir.exe --setup\" offers it)";
@@ -896,10 +933,27 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     plan.audio_log = dir + L"\\logs\\audio.log";
     if (s.audio) choose_audio(s, src, plan);
 
+    // A 10-bit capture carries SDR or HDR alike, so what it is shown as can
+    // change while playing: with the console's signal, or in the menu.
+    const bool live = src.raw && src.layout.format == PixelFormat::P010;
+    // RTX Video HDR: NVIDIA RTX only (the video processor that also does VSR).
+    const bool rtx_offered = plan.vsr == L"nvidia";
+    bool rtx = s.rtx_hdr && rtx_offered;
+    if (live && mode == PictureMode::Hdr && rtx) {
+        // HDR on the screen whatever the console sends. It starts as the
+        // signal was the last time, as Automatic does.
+        const Picture p = picture_for(mode, rtx, s.auto_found_hdr);
+        s.hdr = p.hdr;
+        plan.rtx_hdr = p.rtx_hdr;
+    }
+
     // The in-game menu keeps what it changes in the same file.
     SetEnvironmentVariableW(L"GLASIR_SETTINGS", settings_path.c_str());
-    SetEnvironmentVariableW(L"GLASIR_VIDEO_MODE", s.hdr ? L"hdr" : L"sdr");
-    SetEnvironmentVariableW(L"GLASIR_VIDEO_AUTO", s.hdr_auto ? L"1" : L"0");
+    SetEnvironmentVariableW(L"GLASIR_VIDEO_MODE", s.hdr ? L"hdr" : L"sdr");  // the signal, as shown to start with
+    SetEnvironmentVariableW(L"GLASIR_PICTURE",
+                            mode == PictureMode::Auto ? L"auto" : mode == PictureMode::Hdr ? L"hdr" : L"sdr");
+    SetEnvironmentVariableW(L"GLASIR_PICTURE_LIVE", live ? L"1" : L"0");
+    SetEnvironmentVariableW(L"GLASIR_RTX_HDR", !rtx_offered ? L"none" : s.rtx_hdr ? L"on" : L"off");
     SetEnvironmentVariableW(L"GLASIR_HDR_AVAILABLE", src.hdr_available ? L"1" : L"0");
     SetEnvironmentVariableW(L"GLASIR_WINDOW_MODE",
                             s.fullscreen ? L"fullscreen" : s.borderless ? L"borderless" : L"windowed");
@@ -924,15 +978,22 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
         backdrop.start(mpv.pid(), std::move(w));
     }
     int rc = 0;
-    bool signal_changed = false;  // video.mode = auto: the picture starts again as the other kind
     bool quit_asked = false;      // another Glasir asked this one to close: no restart, whatever else asks
+    const bool found_before = s.auto_found_hdr;
+    // The menu's Picture and its RTX HDR switch, for the loop that passes
+    // the frames on (-1: nothing asked).
+    std::atomic<int> asked_mode{-1}, asked_rtx{-1};
     InGameReports reports(dir, settings_path, plan.ipc_pipe, mpv);  // after changes stops: it calls this
     MpvWatch changes;
-    changes.on_message = [&reports, &backdrop](const std::vector<std::string> &words) {
+    changes.on_message = [&reports, &backdrop, &asked_mode, &asked_rtx](const std::vector<std::string> &words) {
         if (words.front() == "glasir-window" && words.size() > 1 && words[1] == "again")
             backdrop.place_again();  // mpv left its own full screen (glasir_window.lua)
         else if (words.front() == "glasir-window" && words.size() > 1)
             backdrop.set_borderless(words[1] == "borderless");
+        else if (words.front() == "glasir-picture" && words.size() > 1)
+            asked_mode = int(words[1] == "auto" ? PictureMode::Auto : words[1] == "hdr" ? PictureMode::Hdr : PictureMode::Sdr);
+        else if (words.front() == "glasir-rtx-hdr" && words.size() > 1)
+            asked_rtx = words[1] == "on" ? 1 : 0;
         else
             reports.on_message(words);
     };
@@ -1009,10 +1070,18 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
                 log(L"dedup on: threshold {}, keepalive {} ms, frame generation link {}", s.dedup_threshold,
                     s.dedup_keepalive_ms, link ? L"open" : L"unavailable");
             }
-            const Signal shown = s.hdr ? Signal::Hdr : Signal::Sdr;
-            if (src.watch_signal) {
-                pump->signal = std::make_unique<SignalMonitor>(shown, src.layout.width, src.layout.height);
-                log(L"video.mode = auto: shown as {} until the picture says otherwise", signal_name(shown));
+            Picture shown{s.hdr, plan.rtx_hdr};
+            auto follows = [&] { return mode == PictureMode::Auto || (mode == PictureMode::Hdr && rtx); };
+            auto picture_text = [](const Picture &p) {
+                return p.hdr ? L"HDR" : p.rtx_hdr ? L"SDR in HDR (NVIDIA RTX Video HDR)" : L"SDR";
+            };
+            if (live) {
+                // The signal is watched in every mode: it is there to follow
+                // as soon as the menu asks for that.
+                pump->signal = std::make_unique<SignalMonitor>(s.hdr ? Signal::Hdr : Signal::Sdr, src.layout.width,
+                                                               src.layout.height);
+                log(L"picture: shown as {}{}", picture_text(shown),
+                    follows() ? L" until the picture says otherwise" : L"");
             }
             std::thread reader([pump] {
                 const FrameSinks sinks{pump->repeats.get(), pump->signal.get()};
@@ -1026,7 +1095,8 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
             UINT64 sent = 0;
             bool stalled = false;
             BehindLog behind;
-            const ULONGLONG started = GetTickCount64();
+            ULONGLONG switch_after = 0;  // a switch mpv did not take is tried again then
+            bool by_menu = false;        // the switch to make is the menu's (not said in a toast)
             for (;;) {
                 const std::vector<BYTE> *frame = slot.take(1000);
                 if (!frame) {
@@ -1039,27 +1109,44 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
                 if (!mpv.write_frame(frame->data(), frame_bytes)) break;
                 ++sent;
                 behind.check(slot);
-                if (!g_restart_toast.empty() && GetTickCount64() - started > 2500) {
-                    // Once the overlay that draws it is up.
-                    mpv.send(plan.ipc_pipe, ipc_command({L"script-message", L"glasir-toast", g_restart_toast, L"4000"}),
-                             500);
-                    g_restart_toast.clear();
+                if (!pump->signal) continue;
+                // The console went from SDR to HDR or back (or the first
+                // guess was wrong), or the menu asks for another picture:
+                // mpv shows the frames as that from here on. The capture,
+                // mpv, DLSS 5 and frame generation keep running.
+                if (const int m = asked_mode.exchange(-1); m >= 0) mode = PictureMode(m), by_menu = true;
+                if (const int r = asked_rtx.exchange(-1); r >= 0) rtx = r == 1 && rtx_offered, by_menu = true;
+                const bool found_hdr = pump->signal->found.load() == Signal::Hdr;
+                // glasir.ini is written once mpv is gone (below): the menu
+                // in mpv may be writing it now.
+                if (follows()) g_found_hdr = found_hdr;
+                const Picture want = picture_for(mode, rtx, found_hdr);
+                if (want == shown) {
+                    by_menu = false;
+                    continue;
                 }
-                if (pump->signal && pump->signal->found.load() != shown) {
-                    // The console went from SDR to HDR or back (or the first
-                    // guess was wrong): the picture starts again as that.
-                    // glasir.ini is written once mpv is gone (below): the
-                    // menu in mpv may be writing it now.
-                    const bool hdr = pump->signal->found.load() == Signal::Hdr;
-                    log(L"video.mode = auto: the signal is {}; starting the picture again", hdr ? L"HDR" : L"SDR");
-                    g_found_hdr = hdr;
-                    signal_changed = true;
-                    break;
+                if (GetTickCount64() < switch_after) continue;
+                std::string commands = picture_commands(plan, s, want);
+                // The menu shows its own choice; a change of the console's is said.
+                if (!by_menu)
+                    commands += ipc_command(
+                        {L"script-message", L"glasir-toast",
+                         want.hdr       ? L"HDR signal: showing HDR"
+                         : want.rtx_hdr ? L"SDR signal: showing it in HDR (RTX Video HDR)"
+                                        : L"SDR signal: showing SDR",
+                         L"4000"});
+                if (!mpv.send(plan.ipc_pipe, commands, 500)) {
+                    switch_after = GetTickCount64() + 1000;
+                    continue;
                 }
+                log(L"picture: {} now ({})", picture_text(want),
+                    by_menu ? L"the menu" : found_hdr ? L"the signal is HDR" : L"the signal is SDR");
+                shown = want;
+                by_menu = false;
             }
             log(L"{} frames sent to mpv", sent);
 
-            const bool mpv_gone = !signal_changed && mpv.exited();
+            const bool mpv_gone = mpv.exited();
             mpv.close_stdin();
             mpv.stop(plan.ipc_pipe, src.raw_input ? 1000 : 2000);
 
@@ -1118,12 +1205,11 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     log(L"mpv exited (code {})", mpv.exit_code());
     changes.stop();
     keep_changes(changes, settings_path);
-    if (signal_changed && g_found_hdr)
+    if (g_found_hdr && *g_found_hdr != found_before)
         save_settings(settings_path, {{L"video", L"auto_found", *g_found_hdr ? L"hdr" : L"sdr"}});
-    if (quit_asked && (signal_changed || mpv.exit_code() == kRestartCode))
+    if (quit_asked && mpv.exit_code() == kRestartCode)
         log(L"not starting the picture again: another Glasir asked this one to close");
-    restart = (mpv.exit_code() == kRestartCode || signal_changed) && rc == 0 && !quit_asked;
-    if (restart && signal_changed) g_restart_toast = s.hdr ? L"SDR signal: showing SDR" : L"HDR signal: showing HDR";
+    restart = mpv.exit_code() == kRestartCode && rc == 0 && !quit_asked;
     return rc;
 }
 
@@ -1238,6 +1324,21 @@ void show_in_explorer(const std::wstring &file) {
     ShellExecuteW(nullptr, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
+// The launcher's download of NVIDIA Video Frame Generation: NVIDIA's licences
+// first, and nothing is downloaded unless they are accepted.
+void setup_vfg(const std::wstring &engine) {
+    if (!ask_vfg_licence()) {
+        log(L"setup: NVIDIA Video Frame Generation: its licences were not accepted");
+        return;
+    }
+    log(L"setup: NVIDIA Video Frame Generation: its licences were accepted in the window");
+    std::wstring error;
+    if (!run_setup(engine, {Component::Vfg}, Versions::Tested, true, error) && error != L"cancelled")
+        show(L"Glasir could not download NVIDIA Video Frame Generation: " + sentence(error) +
+                 L"\n\nGlasir's own frame generation is used until then. logs\\glasir.log has the details.",
+             MB_ICONERROR);
+}
+
 // The launcher until Play (true) or the window is closed (false). Its
 // Download/Update buttons run setup, as --setup does, and come back; its
 // update offer installs the newer Glasir, which then starts in its place.
@@ -1277,7 +1378,10 @@ bool launcher(const Args &args, UpdateCheck &update) {
         HANDLE quit_event = CreateEventW(nullptr, TRUE, FALSE, kQuitEvent);
         {
             Instance instance(quit_event);  // a Glasir playing closes first: setup replaces its files
-            if (instance.take()) setup(setup_args, dir, dir + L"\\engine");
+            if (instance.take()) {
+                if (action == LauncherAction::SetupVfg) setup_vfg(dir + L"\\engine");
+                else setup(setup_args, dir, dir + L"\\engine");
+            }
         }
         CloseHandle(quit_event);
     }

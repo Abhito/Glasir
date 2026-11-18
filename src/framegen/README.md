@@ -28,7 +28,8 @@ in [docs/FRAMEGEN-LEARNINGS.md](../../docs/FRAMEGEN-LEARNINGS.md).
 2. **`zz-glasir-framegen.addon64`**, a ReShade add-on that runs last, after the
    DLSS 5 pass. For each real frame B it shows a frame between the previous
    real frame A and B, then B half a frame later: 30 fps becomes 60, 60 becomes
-   120.
+   120. With `Multiplier` 3 or 4 it shows two or three frames between A and
+   B, a third or a quarter of a frame apart (below: provided as is).
 
 The frame in between is **motion-compensated** (`Method=motion`): the add-on
 finds how every part of the picture moved from A to B and draws each pixel
@@ -66,8 +67,12 @@ Settings are in `ReShade.ini`, section `[GLASIR_FRAMEGEN]`:
 | `MaxOutputHz` | 0 | Highest output rate; 0 = the display's refresh rate. |
 | `ResetMs` | 100 | A longer gap between frames starts the timing over. |
 | `RequireDedupLauncher` | 1 | Only run with the link from Glasir's dedup. |
-| `Method` | motion | `motion` = motion-compensated, `blend` = 50/50 mix. |
-| `Quality` | high | `high`, or `fast`: fewer candidates per pixel, about half the drawing cost (glasir.ini). |
+| `Method` | motion | `motion` = motion-compensated, `blend` = 50/50 mix, `vfg` = NVIDIA Video Frame Generation (below; Glasir writes it while glasir.ini says `method = nvidia`). |
+| `Multiplier` | 2 | Frames shown for each of the source's: 2, 3 or 4 (glasir.ini `multiplier`; the menu's "Rate"). Where the display cannot show that many, the highest that fits. 3 and 4 are provided as is (below). |
+| `Quality` | high | `high`, or `fast`: fewer candidates per pixel, about half the drawing cost (glasir.ini). The motion method's. |
+| `VfgQuality` | medium | `Method=vfg`: NVIDIA's model, `low`, `medium` or `high` (glasir.ini `nvidia_quality`). |
+| `VfgAutoCut` | 1 | `Method=vfg`: NVIDIA's own cut detection, which shows the earlier frame again across a cut, and across some fast motion. |
+| `VfgRuntime` | (none) | `Method=vfg`: the folder with NVIDIA's DLLs. Not set: `nvidia-vfg` beside mpv.exe, where Glasir's setup puts them. |
 | `PictureOnly` | 1 | A switch (below). With black bars around the picture (a 16:9 game on a 21:9 screen), frames are generated from the picture alone; mpv says where it is. Better scenery at the picture's edges and less GPU time, but a HUD near those edges loses the bars' protection (docs/FRAMEGEN-LEARNINGS.md, 4.6): `StillHud` is for that, keep the two together. Does nothing without bars. |
 | `EdgeRules` | 1 | A switch. The strip along the frame's edges that only one frame shows in a camera turn is drawn along the turn's motion (same section). |
 | `StillHud` | 1 | A switch. Icons and digits drawn over fast-moving scenery are held where they are: the cells that hold detail which stands still while they move get no motion (docs/FRAMEGEN-LEARNINGS.md, 4.7). Gives a HUD near the picture's edges back what `PictureOnly` takes from it, and acts on a frame without bars too. The scenery right beside such a HUD (a cell, 16 px) stands still with it. |
@@ -104,6 +109,102 @@ of each for both) and it is written for the docking branch, which
 third_party/imgui is not; so they are left out and two type names are
 declared by hand. A ReShade without the overlay, or with another Dear ImGui
 version, gets no panel and the switches stay in the file.
+
+## 3x and 4x (`Multiplier`)
+
+**Provided as is and not recommended; included for players who want the
+choice.** 2x is what this add-on was built, tuned and judged for. With
+`Multiplier` 3 or 4 it shows two or three frames between each two real ones:
+
+- **The frames.** The first is drawn where 2x draws its one (before mpv's
+  present); the others and the real frame follow from `finish_present`, each
+  held on the GPU a step (a third or a quarter of the source's interval) after
+  the one before it was done. With too little time left before the next real
+  frame's effects, what is left is shared equally among the frames still to
+  go, so a late first frame makes the others follow sooner, not later.
+- **The rate.** Where the display cannot show `Multiplier` times the source
+  (60 fps at 4x needs 240 Hz), the highest that fits is used and the menu says
+  so. Below twice the source there are no frames in between, as before.
+- **A rate the GPU cannot hold.** The frames after the first have to fit
+  before the next real frame's effects. With DLSS 5 on at 1440p the first
+  frame in between is done 23-27 ms into a 33 ms interval (the owner's PC,
+  11-17), and the others are still queued when the next real frame comes,
+  which then gets none: three frames and a long one, every other frame,
+  which looks worse than 2x at the same 60 frames a second. So after a few
+  real frames skipped that way (or when mpv drops new frames while
+  generating, before the pause for that), the rate goes down by one, to what
+  holds steady. The menu says so in red, with what would leave room, and a
+  toast says it the first time. It is tried again after 20 s, then after
+  twice as long each time (5 minutes at most), at once when DLSS 5 is
+  switched in the menu or a frame generation setting changes; a try that
+  fails is a third of a second of uneven frames. The menu also says in red
+  when frames are left out for any other reason and 3x or 4x reach less than
+  85 % of their rate.
+- **The cost.** Every frame in between is a whole pass of the generator (its
+  motion search is not kept for the pair's next frame), so 4x takes three
+  times the GPU time of 2x; the real frame is shown two thirds or three
+  quarters of an interval after the first frame in between instead of half,
+  which is that much more delay.
+- **The quality.** A frame a third or a quarter of the way is drawn by the
+  same shaders (they take any place between the two frames). On the synthetic
+  clips made with three and four steps (`STEPS=3 make_sequences.sh`,
+  `fg_eval --multiplier 3`) the motion method scores 43.11 dB at 3x and
+  44.74 dB at 4x, against 44.08 dB at 2x. That is all that was measured
+  (2026-11-17): no captures have true frames at thirds or quarters, no
+  capture card or VRR screen was used, and nothing was tuned for it. Three of
+  every four frames on screen are then made up, and what the generator gets
+  wrong (HUDs, thin parts, fast motion) is on screen that much longer.
+- **A change is tried at once.** Changing the rate, the quality or who makes
+  the frames in the menu ends a pause for dropped frames (When it generates)
+  and starts over, since what mpv could not keep up with may be gone.
+
+## NVIDIA Video Frame Generation (`Method=vfg`)
+
+Instead of the motion-compensated frame, the frame in between can come from
+NVIDIA's Video Frame Generation, the "VideoFrameGeneration" filter of its
+Video Effects SDK: glasir.ini `[framegen] method = nvidia`, Glasir's window
+("Made by") or the menu. It takes the two real frames and nothing else, as
+this add-on's own generator does.
+
+- **Where it runs.** An RTX 40 or 50 series GPU, with NVIDIA's DLLs in
+  `engine\nvidia-vfg` (five files, about 200 MB). Glasir's window offers their
+  download after showing NVIDIA's licences; `Glasir.exe --setup --components
+  vfg --no-dialogs --accept-nvidia-licence` does it without a window. Nothing
+  of NVIDIA's is in this repository or in Glasir's zip.
+- **Where it does not.** The add-on's own generator makes the frames, and
+  ReShade.log says why: not installed, another GPU, a picture format the
+  filter does not take (scRGB), or a failure while drawing (then for the rest
+  of the session).
+- **How (`fg_vfg.h`, `vfg.hlsl`).** The filter reads and writes packed pixels
+  in CUDA memory. A compute shader packs the picture's part of the two frames
+  into two Direct3D 11 buffers (8-bit RGBA, or R10 G10 B10 A2 for a 10-bit
+  back buffer, PQ as it is), CUDA maps those and a third (it can share a
+  buffer, not a 10-bit texture), the filter runs, and a pixel shader draws the
+  third buffer into the back buffer. The filter's own call returns when it is
+  done, so mpv's thread waits for it (and for the DLSS 5 pass before it on
+  the GPU), where the motion method only queues its work.
+- **What stays the add-on's.** The pacing and the hold, the picture alone
+  (`PictureOnly`), captures, and the fall-back. `EdgeRules`, `StillHud`,
+  `HistorySearch` and `Quality` are the motion method's and do nothing here.
+- **3x and 4x.** The filter makes the pair's other frames from the frames it
+  already has (its multiplier and frame index); as with the motion method,
+  provided as is.
+- **Its model.** `VfgQuality` low, medium (the default) or high. A larger
+  model is cleaner and takes more GPU time; high is for 30 fps games.
+  Changing it in the menu loads the other model at the next frame.
+- **Cuts.** `VfgAutoCut=1` is the filter's own detection: across a cut it
+  shows the earlier frame again, as the motion method does. It also does so
+  across some fast motion; with 0 it draws across real cuts.
+- **Testing.** `fg_eval --methods repeat,vfg --vfg-runtime DIR` runs the same
+  `fg_vfg.h` offline; `eval\vfg_eval.py` runs the filter without Direct3D and
+  must give the same scores. In the app: `tools\smoke_raw.py` with `Method=vfg`
+  (`GLASIR_VFG_RUNTIME=<folder>` uses DLLs from elsewhere).
+  `GLASIR_VFG_PROFILE=1` logs the calling thread's time per frame in between.
+- **No results in public.** NVIDIA's licence forbids giving benchmark,
+  comparison or performance results of its software to others without its
+  permission. Scores and timings of this method stay out of the repository,
+  its issues and bug reports; with it on, the stats line leaves out how long
+  the frame in between took.
 
 ## When it generates
 
@@ -566,8 +667,8 @@ in the first eight, before step 5: 1.18 mean, 1.55 worst. All 64 pairs now
   installs it into `out\Glasir\engine`; the shaders are compiled with fxc
   into headers (`shaders.cmake` lists them). `Glasir.exe --setup` puts
   ReShade (add-on build, from reshade.me) next to mpv.exe.
-- Settings: `glasir.ini` `[framegen]` (on/off, quality, every frame while
-  off). Glasir writes them into `engine\ReShade.ini`, section
+- Settings: `glasir.ini` `[framegen]` (on/off, who makes the frames, quality,
+  every frame while off). Glasir writes them into `engine\ReShade.ini`, section
   `[GLASIR_FRAMEGEN]`, before mpv starts; the other keys there (DebugMarker,
   MaxOutputHz, ResetMs, ToggleKey, CaptureKey, Method, ...) can be edited by
   hand. The add-on logs to `engine\ReShade.log`.
@@ -615,7 +716,14 @@ in the first eight, before step 5: 1.18 mean, 1.55 worst. All 64 pairs now
   errors where one frame hides what the other shows.
 - What no motion search can follow (lightning, sparks, a very fast attack) is
   drawn as a soft smear, not as it would look half way.
-- x2 only.
+- 3x and 4x are provided as is (their section above); 2x is the one that was
+  tuned and measured.
+- `Method=vfg`: built and checked in `smoke_raw.py`'s window (SDR and HDR,
+  DLSS 5 on and off, an RTX 5070 Ti), then played by the owner with the
+  capture card the same day (2026-11-17: 30 fps games, borderless on the
+  ultrawide, DLSS 5 on, 2x to 4x). mpv's thread waits for its frame (above), so behind the
+  DLSS 5 pass the real frame may follow it sooner than half an interval; a
+  HUD moves with the scene (no `StillHud`).
 - At 60 fps full screen the GPU is near its limit next to the DLSS 5 pass (see
   Measured): earlier runs backed off; on 2026-10-30 synthetic runs held 60 + 60
   with no drops.

@@ -49,8 +49,14 @@ install(TARGETS glasir_framegen RUNTIME DESTINATION engine)
 # steady-rate frame feeder for pipeline tests. Developer tools, not shipped.
 add_executable(fg_eval eval/fg_eval.cpp)
 glasir_component(fg_eval)
-target_link_libraries(fg_eval PRIVATE glasir_framegen_interp d3d11 windowscodecs ole32)
+target_link_libraries(fg_eval PRIVATE glasir_framegen_interp d3d11 dxgi windowscodecs ole32)
 target_compile_definitions(fg_eval PRIVATE _CRT_SECURE_NO_WARNINGS)  # getenv for its test switches
+
+# What a second GPU would cost and give (eval/gpu_bench.cpp).
+add_executable(gpu_bench eval/gpu_bench.cpp)
+glasir_component(gpu_bench)
+target_link_libraries(gpu_bench PRIVATE glasir_framegen_interp d3d11 dxgi)
+target_compile_definitions(gpu_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
 
 add_executable(raw_pace eval/raw_pace.cpp)
 glasir_component(raw_pace)

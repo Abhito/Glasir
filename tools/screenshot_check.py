@@ -82,7 +82,7 @@ def main():
     glasir = subprocess.Popen(
         [os.path.join(a.app, 'Glasir.exe'), '--no-dialogs', '--input-raw', '-', '--raw-format', fmt,
          '--set', 'capture.width=1280', '--set', 'capture.height=720', '--set', 'capture.fps=60',
-         '--set', 'window.mode=windowed', '--set', f'video.mode={"hdr" if a.hdr else "sdr"}',
+         '--set', 'window.mode=windowed', '--set', f'video.mode={"hdr" if a.hdr else "sdr"}', '--set', 'video.rtx_hdr=0',
          '--set', f'dlss5.enabled={"on" if a.dlss5 else "off"}'],
         stdin=ffmpeg.stdout)
     ffmpeg.stdout.close()

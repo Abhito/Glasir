@@ -27,7 +27,10 @@ ABOUT = ('The versions of the downloaded programs this Glasir was tested with (s
 # keys' prefix there ('' for a section of its own).
 PARTS = [('mpv', 'mpv', ''), ('reshade', 'reshade', ''), ('feeder', 'dlss5', 'feeder'), ('renodx', 'dlss5', 'renodx'),
          ('dlssnr', 'dlss5', 'dlssnr'), ('dlss', 'dlss5', 'dlss'),
-         ('reshade_fxh', 'dlss5', 'reshade_fxh')]
+         ('reshade_fxh', 'dlss5', 'reshade_fxh'), ('vfg', 'vfg', '')]
+# Installed only on request (NVIDIA Video Frame Generation): an engine folder
+# without it keeps the version already pinned.
+OPTIONAL = {'vfg'}
 
 
 def size_of(url):
@@ -66,6 +69,10 @@ def main():
         def key(what):
             return what if not prefix else prefix if what == 'version' else f'{prefix}_{what}'
         values = {what: ini.get(section, key(what), fallback='') for what in ('version', 'source', 'sha256')}
+        if not any(values.values()) and part in OPTIONAL and isinstance(before.get(part), dict):
+            pins[part] = before[part]
+            print(f"{part:12} {before[part].get('version')}   (not installed here: kept)")
+            continue
         if not all(values.values()):
             print(f'{part}: components.ini has no {" or ".join(w for w, v in values.items() if not v)} for it. '
                   f'Install it with this Glasir first (Glasir.exe --setup).')

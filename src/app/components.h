@@ -7,6 +7,10 @@
 //   DLSS 5     DLSS5-Feeder (jlrouzies-fr), RenoDX-DLSS5 and       engine\...
 //              nvngx_dlssnr.dll (RHI's mirror, RankFTW/rhi-repo),
 //              nvngx_dlss.dll (NVIDIA/DLSS), ReShade.fxh
+//   NVIDIA Video Frame Generation, only when the user asks for it and has
+//              accepted NVIDIA's licences: the Video Effects SDK's runtime,
+//              from NVIDIA's package index (pypi.nvidia.com/nvidia-vfx)
+//                                                                  engine\nvidia-vfg
 //
 // Each Glasir installs the versions it was tested with: components.json
 // (built in) names every part's version, address and SHA-256, so a new
@@ -29,15 +33,15 @@
 
 namespace glasir {
 
-enum class Component { Mpv, ReShade, Dlss5 };
+enum class Component { Mpv, ReShade, Dlss5, Vfg };
 
 const wchar_t *component_name(Component c);
 bool component_installed(const std::wstring &engine_dir, Component c);
 // "name version" lines from components.ini, for the log.
 std::vector<std::wstring> installed_versions(const std::wstring &engine_dir);
 
-// One part in its tested version. The parts: mpv, reshade, and DLSS 5's
-// feeder, renodx, dlssnr, dlss and reshade_fxh.
+// One part in its tested version. The parts: mpv, reshade, DLSS 5's feeder,
+// renodx, dlssnr, dlss and reshade_fxh, and vfg.
 struct Pin {
     std::wstring version, url;
     std::string sha256;  // of the download

@@ -48,7 +48,9 @@ struct Overlay {
     UINT style_height = 0;
     std::wstring settings_path;
     bool source_hdr = false;
-    bool source_auto = false;
+    int picture = 1;        // glasir.ini's video.mode as mpv started: 0 auto, 1 sdr, 2 hdr
+    bool picture_live = false;
+    int rtx_hdr = -1;       // video.rtx_hdr as mpv started; -1: not offered (no NVIDIA RTX GPU)
     bool hdr_available = true;
     bool borderless = true;
     // Frames the menu was drawn on since it opened: mpv's presents, and the
@@ -120,8 +122,16 @@ bool init(ID3D11Device *device) {
     if (GetEnvironmentVariableW(L"GLASIR_SETTINGS", path, MAX_PATH) > 0) g.settings_path = path;
     wchar_t mode[8] = {};
     g.source_hdr = GetEnvironmentVariableW(L"GLASIR_VIDEO_MODE", mode, 8) > 0 && _wcsicmp(mode, L"hdr") == 0;
-    wchar_t video_auto[4] = {};
-    g.source_auto = GetEnvironmentVariableW(L"GLASIR_VIDEO_AUTO", video_auto, 4) > 0 && wcscmp(video_auto, L"1") == 0;
+    wchar_t picture[8] = {};
+    if (GetEnvironmentVariableW(L"GLASIR_PICTURE", picture, 8) > 0)
+        g.picture = _wcsicmp(picture, L"auto") == 0 ? 0 : _wcsicmp(picture, L"hdr") == 0 ? 2 : 1;
+    else
+        g.picture = g.source_hdr ? 2 : 1;
+    wchar_t live[4] = {};
+    g.picture_live = GetEnvironmentVariableW(L"GLASIR_PICTURE_LIVE", live, 4) > 0 && wcscmp(live, L"1") == 0;
+    wchar_t rtx_hdr[8] = {};
+    if (GetEnvironmentVariableW(L"GLASIR_RTX_HDR", rtx_hdr, 8) > 0 && _wcsicmp(rtx_hdr, L"none") != 0)
+        g.rtx_hdr = _wcsicmp(rtx_hdr, L"on") == 0 ? 1 : 0;
     // Unset (mpv started some other way): offered, as before.
     wchar_t hdr_available[4] = {};
     g.hdr_available = GetEnvironmentVariableW(L"GLASIR_HDR_AVAILABLE", hdr_available, 4) == 0 ||
@@ -215,7 +225,9 @@ void build_and_draw(ID3D11DeviceContext *context, ID3D11Texture2D *back_buffer, 
         frame.encoding = g.encoding;
         frame.settings_path = g.settings_path;
         frame.source_hdr = g.source_hdr;
-        frame.source_auto = g.source_auto;
+        frame.picture = g.picture;
+        frame.picture_live = g.picture_live;
+        frame.rtx_hdr = g.rtx_hdr;
         frame.hdr_available = g.hdr_available;
         frame.borderless = g.borderless;
         frame.scale = scale;

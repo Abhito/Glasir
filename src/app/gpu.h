@@ -22,6 +22,10 @@ GpuInfo display_gpu();
 // nvngx_dlssnr.dll 310.9.16 and newer; 310.8 ran on RTX 50 only).
 bool dlss5_gpu(const GpuInfo &gpu);
 
+// NVIDIA Video Frame Generation runs on RTX 40 and 50 series GPUs (the Video
+// Effects SDK's filter; the add-on asks CUDA and has the last word).
+bool vfg_gpu(const GpuInfo &gpu);
+
 // The video super resolution the GPU's video processor may have, as mpv's
 // d3d11vpp scaling-mode names it: "nvidia" (RTX), "intel", or "none". The
 // driver has the last word: glasir_scaling.lua falls back to FSR 1 if it

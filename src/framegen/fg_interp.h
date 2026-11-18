@@ -79,6 +79,12 @@ struct Picture {
 struct DrawOptions {
     Method method = Method::motion;
     float t = 0.5f;             // 0 = frame a, 1 = frame b
+    // Several frames between one pair (3x: two, 4x: three): this one is
+    // `index` of the `multiplier - 1` (t = index / multiplier), and
+    // same_pair says a and b are the frames of the draw before it. For
+    // fg_vfg.h, which keeps what it has of the pair; Interpolator goes by t.
+    int index = 1, multiplier = 2;
+    bool same_pair = false;
     bool follows = false;       // a is the b of the pair keep_history() was last called for
     bool marker = false;        // debug square in the top-left corner
     float marker_level = 0.5f;  // its brightness in the target's encoding

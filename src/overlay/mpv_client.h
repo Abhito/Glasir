@@ -21,6 +21,12 @@ struct MpvState {
     int delay = -1;   // ms, likewise
     int width = 0, height = 0;  // the video's size
     std::string scaling;        // glasir_scaling.lua's mode (user-data/glasir/scaling): mpv, fsr, vsr, cnn, anime4k
+    // What the frames are shown as since Glasir last switched it while
+    // playing (user-data/glasir/signal: hdr or sdr); "": as mpv started.
+    std::string signal;
+    // glasir_scaling.lua's RTX Video HDR (user-data/glasir/rtx-hdr): on (it
+    // runs), off, or unavailable (asked for, and it could not start).
+    std::string rtx_hdr;
     // osd-dimensions: the window's size and the black bars around the video
     // (margins left, top, right, bottom); w = 0 until known.
     struct Osd {

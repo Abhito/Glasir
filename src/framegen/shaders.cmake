@@ -29,4 +29,6 @@ set(GLASIR_FRAMEGEN_SHADERS
     "cs_5_0|ClassCS|L_CLASS|g_lclass_cs|lclass_cs.h|flow.hlsl"
     "cs_5_0|RefineCS|L_REFINE|g_lrefine_cs|lrefine_cs.h|flow.hlsl"
     "cs_5_0|PickCS|L_PICK|g_lpick_cs|lpick_cs.h|flow.hlsl"
+    "cs_5_0|PackCS|PACK|g_vfg_pack_cs|vfg_pack_cs.h|vfg.hlsl"
+    "ps_5_0|UnpackPS|UNPACK|g_vfg_unpack_ps|vfg_unpack_ps.h|vfg.hlsl"
 )

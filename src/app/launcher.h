@@ -11,9 +11,10 @@ namespace glasir {
 
 class UpdateCheck;
 
-// Setup: download the components again. SelfUpdate: install the newer
+// Setup: download the components again. SetupVfg: download NVIDIA Video
+// Frame Generation (after its licences). SelfUpdate: install the newer
 // Glasir the update check found.
-enum class LauncherAction { Play, Setup, SelfUpdate, Quit };
+enum class LauncherAction { Play, Setup, SetupVfg, SelfUpdate, Quit };
 
 struct LauncherExtras {
     const UpdateCheck *update = nullptr;  // shows "Glasir x.y.z is out" when it found one

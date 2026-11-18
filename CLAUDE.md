@@ -28,6 +28,13 @@
   pipe is `\\.\pipe\glasir`.
 - Frame generation: read docs/FRAMEGEN-LEARNINGS.md first (what was tried,
   dead ends, how to judge changes: across all captures, never one).
+- 3x and 4x frame generation (`Multiplier`, glasir.ini `[framegen]
+  multiplier`, "Rate" in the launcher and the menu) are provided as is, not
+  recommended and never the default: say so wherever the docs describe them
+  (README, glasir.ini's comments, src/framegen/README.md). Not in the "Rate"
+  tooltips: the owner had it taken out of them (11-17).
+  `fg_eval --multiplier 3|4` scores them on clips made with `STEPS=3|4
+  make_sequences.sh` (FG_SEQ, FG_SRC: folders outside the repo).
 - Frame generation (`src/framegen`, MPL-2.0, design in its README.md): after a
   change to the shaders or `fg_interp.h`, compare `fg_eval.exe` scores before
   and after (clips/captures stay outside the repo; the prototype's are in
@@ -55,6 +62,22 @@
   `Selected=0x1BEC192E` in ReShade.ini's `[OVERLAY] Docking` is Add-ons.
   `GLASIR_FRAMEGEN_CAPTURE_AFTER=<s>` makes the add-on save frames to
   `out\Glasir\Captures` (16-bit PQ for HDR: tone-map before viewing).
+- NVIDIA Video Frame Generation (`Method=vfg`, `src/framegen/fg_vfg.h`, its
+  section in src/framegen/README.md): an opt-in generator on RTX 40/50,
+  glasir.ini `[framegen] method = nvidia`, `nvidia_quality`. Its DLLs are
+  NVIDIA's and never go into the repo or the zip: setup downloads them to
+  `engine\nvidia-vfg` only after NVIDIA's licences are accepted (the
+  launcher's dialog, or `--setup --components vfg --no-dialogs
+  --accept-nvidia-licence`, on a copy of the app folder).
+  `GLASIR_VFG_RUNTIME=<folder>` uses DLLs from elsewhere. Test with
+  `fg_eval --methods repeat,vfg` (must give `eval\vfg_eval.py`'s scores) and
+  `tools/smoke_raw.py` on a copy whose ReShade.ini says `Method=vfg`
+  (`--window 2560x1440` for a larger window); `GLASIR_VFG_PROFILE=1` logs
+  the calling thread's time per frame. NVIDIA's licence (Software License
+  Agreement 8.9) forbids giving benchmark, comparison or performance results
+  of its software to others: never put this method's scores or timings in
+  the repo, commit messages, issues, pull requests or logs users send in.
+  Tell the owner in chat only.
 - Glasir.exe opens its launcher window unless `--no-dialogs`, `--play` or
   `--input-raw` is given; the tools pass `--no-dialogs`. The in-game menu
   (Tab) logs "Glasir menu: ..." to `engine\ReShade.log`, with how many frames
@@ -65,6 +88,24 @@
   The launcher can be driven without focus by posting WM_KEYDOWN/WM_KEYUP
   (ImGui keyboard navigation: arrows, Space); posted mouse clicks are not
   reliable, as Windows sends WM_MOUSELEAVE when the real cursor is elsewhere.
+  Find a window to post to by its class and its title (the launcher:
+  `GlasirLauncher`; setup's dialogs: `#32770` titled "Glasir setup"): other
+  programs keep hidden windows of the plain dialog class, and a search by
+  class alone finds theirs. A dialog left open is on the owner's screen and
+  may get clicked: close it (WM_COMMAND with IDCANCEL) as soon as it is seen.
+- The look of the launcher and the menu (`src/common/ui_style.h`,
+  `ui_widgets.h`: cards, switches, rows of choices, sliders, "More
+  options"; redesigned 2026-11-17 because the owner found them dated and
+  cluttered). Keep them short: what is changed for a session is in sight
+  (card, mode, SDR/HDR, DLSS 5, frame generation, volume), what is set once
+  goes behind "More options" in the launcher and behind each card's own
+  "More" in the menu (boost and audio delay with the sound, scaling and the
+  window with the picture), an explanation goes into a tooltip
+  (`ui::tooltip`, also shown for the keyboard's item), and a note stays on
+  screen only where it says something to do. A new setting gets one of the
+  controls there, not a row of radio buttons or a paragraph. Before posting
+  Space or Enter in a test, capture the window and look where the keyboard's
+  ring is: on the launcher's Play it starts playing from the card.
 - mpv's window (`src/app/backdrop.cpp`, Glasir's own thread): borderless
   full screen covers the whole monitor, black bars included, by default.
   `[window] skip_black_bars = 1` (launcher: "Skip the black bars") sizes
@@ -101,11 +142,29 @@
   stops the picture), so a
   first short run can end before DLSS 5 engages.
 - SDR or HDR (`video.mode = auto`, the default; `src/capture/signal_kind.h`):
-  told from the 10-bit capture's top luma and chroma, the picture restarted
-  when it changes. `GLASIR_SIGNAL_LOG=1` logs what it measures every 2 s
-  ("signal:" lines in glasir.log). Its limits come from measured signals
-  (the header lists them): change them only with new measurements from a
-  real console in both modes. The tools pass `video.mode` themselves.
+  told from the 10-bit capture's top luma and chroma. `GLASIR_SIGNAL_LOG=1`
+  logs what it measures every 2 s ("signal:" lines in glasir.log). Its
+  limits come from measured signals (the header lists them): change them
+  only with new measurements from a real console in both modes. The tools
+  pass `video.mode` themselves (and `video.rtx_hdr=0` with `--hdr`: their
+  test pattern looks like SDR).
+- A 10-bit capture is switched between SDR and HDR while playing, never by
+  starting mpv again (`picture_commands` in `src/app/mpv_launch.cpp`, the
+  loop in `main.cpp`'s `run`): the labelled tag filter `@glasir-colour` is
+  replaced, `script-message glasir-signal hdr|sdr|rtx` tells
+  `glasir_scaling.lua` (its filters depend on the tags), and
+  `target-colorspace-hint yes|no` switches mpv's swap chain. Never set
+  `d3d11-output-csp` while playing: mpv builds its output again, ReShade and
+  all (about 9 s). The menu's Picture sends `script-message glasir-picture
+  auto|sdr|hdr`; only an 8-bit capture (`GLASIR_PICTURE_LIVE=0`) still quits
+  mpv with code 42 to have the card opened in another mode. `video.rtx_hdr`
+  ("RTX HDR for SDR", NVIDIA RTX, Picture = HDR): the signal is watched
+  there too and SDR goes through mpv's `d3d11vpp=nvidia-true-hdr`, in the
+  same filter as VSR when both run; off, everything is HDR whatever the
+  picture looks like. Test with `python tools/picture_check.py [--mode hdr]
+  [--no-rtx-hdr] [--menu]` (a P010 pattern that looks like SDR, then HDR,
+  then SDR; about half a minute in a window), with DLSS 5 on too
+  (`--set dlss5.enabled=on --each 25`).
 - Updates and bug reports (`src/app/update.cpp`, `bug_report.cpp`): the repo
   is public and releases are real (v0.1.0 first); publishing one is the
   owner's call. Test with `GLASIR_UPDATE_TEST_RELEASE=<release.json>` (GitHub's

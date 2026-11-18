@@ -40,6 +40,15 @@ bool dlss5_gpu(const GpuInfo &gpu) {
     return std::regex_search(gpu.name, nr);
 }
 
+bool vfg_gpu(const GpuInfo &gpu) {
+    if (gpu.vendor != kVendorNvidia) return false;
+    // GeForce RTX 4050 ... 5090, desktop and laptop, and the workstation
+    // cards of those generations (RTX 4000 Ada Generation, RTX PRO 6000
+    // Blackwell).
+    static const std::wregex vfg(L"RTX\\s*[45]0[5-9]0|\\bAda\\b|Blackwell", std::regex::icase);
+    return std::regex_search(gpu.name, vfg);
+}
+
 const wchar_t *vsr_kind(const GpuInfo &gpu) {
     if (gpu.vendor == kVendorNvidia && gpu.name.find(L"RTX") != std::wstring::npos) return L"nvidia";
     if (gpu.vendor == kVendorIntel) return L"intel";

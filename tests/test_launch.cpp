@@ -197,6 +197,9 @@ int main() {
                    !apply_override(s, L"video.mode=dolby", error),
                "--set video.mode=auto, and what it found last");
         expect(apply_override(s, L"video.mode=hdr", error) && s.hdr && !s.hdr_auto, "back to video.mode=hdr");
+        expect(s.rtx_hdr && apply_override(s, L"video.rtx_hdr=0", error) && !s.rtx_hdr &&
+                   apply_override(s, L"video.rtx_hdr=1", error) && s.rtx_hdr && !apply_override(s, L"video.rtx_hdr=x", error),
+               "video.rtx_hdr: on unless said, 1 or 0");
         expect(apply_override(s, L"capture.fps = 120", error) && s.fps == 120, "--set with spaces");
         expect(apply_override(s, L"Capture.Device=My Card", error) && s.device == L"My Card",
                "--set keeps the value's case");
@@ -251,12 +254,15 @@ int main() {
         plan.fps = 60;
         auto args = mpv_arguments(plan, s);
         expect(has(args, L"--demuxer-rawvideo-mp-format=nv12") && has(args, L"--demuxer-rawvideo-fps=60") &&
-                   has(args, L"--vf=format=colormatrix=bt.709:colorlevels=limited:primaries=bt.709:chroma-location=uhd"),
-               "SDR NV12: raw format, rate and BT.709 tags");
+                   has(args, L"--vf=@glasir-colour:format=colormatrix=bt.709:colorlevels=limited:primaries=bt.709:"
+                             L"chroma-location=uhd") &&
+                   has(args, L"--target-colorspace-hint=no") &&
+                   has(args, L"--script-opts-append=glasir_scaling-rtx_hdr=no"),
+               "SDR NV12: raw format, rate and BT.709 tags (a labelled filter: replaced while playing)");
         plan.layout.format = PixelFormat::YUY2;
         args = mpv_arguments(plan, s);
         expect(has(args, L"--demuxer-rawvideo-mp-format=yuyv422") &&
-                   has(args, L"--vf=format=colormatrix=bt.709:colorlevels=limited:primaries=bt.709:"
+                   has(args, L"--vf=@glasir-colour:format=colormatrix=bt.709:colorlevels=limited:primaries=bt.709:"
                              L"chroma-location=mpeg2/4/h264"),
                "SDR YUY2: yuyv422, chroma sited left");
         s.hdr = true;
@@ -266,7 +272,44 @@ int main() {
         expect(has(args, L"--demuxer-rawvideo-mp-format=p010") && has(args, L"--demuxer-rawvideo-fps=59.94") &&
                    has(args, L"--d3d11-output-csp=pq") && has(args, L"--target-colorspace-hint=yes"),
                "HDR P010: PQ output");
+        // The picture switched while playing: the tags (the same label, so
+        // the filter is replaced), the script's filters, mpv's output, what
+        // the menu reads.
+        const std::string to_sdr = picture_commands(plan, s, Picture{false, false});
+        const std::string to_hdr = picture_commands(plan, s, Picture{true, false});
+        const std::string to_rtx = picture_commands(plan, s, Picture{false, true});
+        auto in = [](const std::string &text, const char *part) { return text.find(part) != std::string::npos; };
+        expect(in(to_sdr, "[\"vf\",\"add\",\"@glasir-colour:format=colormatrix=bt.709:colorlevels=limited:"
+                          "primaries=bt.709:chroma-location=uhd\"]") &&
+                   in(to_sdr, "[\"script-message\",\"glasir-signal\",\"sdr\"]") &&
+                   in(to_sdr, "[\"set\",\"target-colorspace-hint\",\"no\"]") &&
+                   in(to_sdr, "[\"set\",\"user-data/glasir/signal\",\"sdr\"]"),
+               "live switch to SDR: BT.709 tags, an SDR output");
+        expect(in(to_hdr, "[\"vf\",\"add\",\"@glasir-colour:format=colormatrix=bt.2020-ncl:") &&
+                   in(to_hdr, "gamma=pq:max-luma=1000:max_cll=1000\"]") &&
+                   in(to_hdr, "[\"script-message\",\"glasir-signal\",\"hdr\"]") &&
+                   in(to_hdr, "[\"set\",\"target-colorspace-hint\",\"yes\"]") &&
+                   in(to_hdr, "[\"set\",\"user-data/glasir/signal\",\"hdr\"]"),
+               "live switch to HDR: PQ tags, an HDR output");
+        expect(in(to_rtx, "primaries=bt.709:chroma-location=uhd\"]") &&
+                   in(to_rtx, "[\"script-message\",\"glasir-signal\",\"rtx\"]") &&
+                   in(to_rtx, "[\"set\",\"target-colorspace-hint\",\"yes\"]") &&
+                   in(to_rtx, "[\"set\",\"user-data/glasir/signal\",\"sdr\"]") &&
+                   !in(to_rtx, "d3d11-output-csp"),
+               "live switch to SDR through RTX Video HDR: BT.709 tags, an HDR output (never d3d11-output-csp)");
+        expect(Picture{false, true}.output_hdr() && Picture{true, false}.output_hdr() && !Picture{false, false}.output_hdr(),
+               "the screen is in HDR for an HDR signal and for RTX Video HDR");
+        // A start with an SDR signal through RTX Video HDR: SDR tags, HDR output.
         s.hdr = false;
+        plan.rtx_hdr = true;
+        args = mpv_arguments(plan, s);
+        expect(has(args, L"--vf=@glasir-colour:format=colormatrix=bt.709:colorlevels=limited:primaries=bt.709:"
+                         L"chroma-location=uhd") &&
+                   has(args, L"--script-opts-append=glasir_scaling-hdr=no") &&
+                   has(args, L"--script-opts-append=glasir_scaling-rtx_hdr=yes") &&
+                   has(args, L"--d3d11-output-csp=pq") && has(args, L"--target-colorspace-hint=yes"),
+               "RTX Video HDR at start: SDR tags, the filter asked for, PQ output");
+        plan.rtx_hdr = false;
         plan.raw = false;
         plan.dshow_device = L"USB Video";
         plan.dshow_mode = mode(L"MJPG", 1920, 1080, 60);
@@ -684,7 +727,7 @@ int main() {
                "tested set: a short SHA-256, http, no version or no object is refused");
         const PinSet &tested = tested_components();
         bool all = true;
-        for (const char *part : {"mpv", "reshade", "feeder", "renodx", "dlssnr", "dlss", "reshade_fxh"})
+        for (const char *part : {"mpv", "reshade", "feeder", "renodx", "dlssnr", "dlss", "reshade_fxh", "vfg"})
             all = all && tested.find(part);
         expect(all, "tested set: the built-in one names every part");
 

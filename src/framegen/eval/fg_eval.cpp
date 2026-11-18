@@ -16,6 +16,19 @@
 //
 //   fg_eval.exe [--clip NAME] [--out DIR] [--methods repeat,blend,motion] SEQ_DIR
 //
+// Method "vfg" is NVIDIA's Video Frame Generation through fg_vfg.h, as the
+// add-on runs it: --vfg-runtime DIR (or GLASIR_VFG_RUNTIME) is the folder with
+// its DLLs, --vfg-mode low|medium|high its model, --vfg-no-auto-cut turns its
+// own cut detection off. 16-bit clips go to it as 10-bit, the others as 8-bit.
+// NVIDIA's licence forbids giving its results (scores, timings) to others
+// without NVIDIA's permission: keep them out of the repository and its issues.
+//
+// --multiplier M (3 or 4): every Mth file is a real frame and the M - 1
+// between two of them are the true frames for the M - 1 made between that
+// pair, a third or a quarter of the way apart (clips made with
+// `STEPS=M make_sequences.sh`; of a capture's five frames, 4 uses the first
+// and the last).
+//
 // --picture X0 Y0 X1 Y1: the picture's place in frames with black bars (the
 // add-on's PictureOnly): the generator works on that part alone. --adjacent
 // and --set NAME VALUE: below.
@@ -25,6 +38,7 @@
 
 #include <windows.h>
 #include <d3d11.h>
+#include <dxgi.h>
 #include <wincodec.h>
 #include <wrl/client.h>
 
@@ -37,6 +51,7 @@
 #include <vector>
 
 #include "fg_interp.h"
+#include "fg_vfg.h"
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "windowscodecs.lib")
@@ -50,6 +65,7 @@ namespace {
 // 16 bits a channel whatever the file had, so 10-bit captures keep theirs.
 struct Image {
     UINT w = 0, h = 0;
+    UINT bits = 8;  // a channel in the file
     std::vector<UINT16> rgba;
 };
 
@@ -64,6 +80,12 @@ bool load_png(IWICImagingFactory *wic, const fs::path &path, Image &img) {
                                      WICBitmapPaletteTypeCustom)) ||
         FAILED(converter->GetSize(&img.w, &img.h)))
         return false;
+    WICPixelFormatGUID stored{};
+    if (SUCCEEDED(frame->GetPixelFormat(&stored)) &&
+        (IsEqualGUID(stored, GUID_WICPixelFormat48bppRGB) || IsEqualGUID(stored, GUID_WICPixelFormat64bppRGBA) ||
+         IsEqualGUID(stored, GUID_WICPixelFormat48bppBGR) || IsEqualGUID(stored, GUID_WICPixelFormat64bppBGRA) ||
+         IsEqualGUID(stored, GUID_WICPixelFormat16bppGray)))
+        img.bits = 16;
     img.rgba.resize(size_t(img.w) * img.h * 4);
     return SUCCEEDED(converter->CopyPixels(nullptr, img.w * 8, static_cast<UINT>(img.rgba.size() * 2),
                                            reinterpret_cast<BYTE *>(img.rgba.data())));
@@ -161,6 +183,17 @@ int wmain(int argc, wchar_t **argv) {
     // clips it does not fit in are made whole.
     fg::Picture picture;
     std::vector<std::pair<std::wstring, double>> tuning;  // --set NAME VALUE
+    // Method "vfg" (fg_vfg.h).
+    std::wstring vfg_runtime;
+    fg::VfgMode vfg_mode = fg::VfgMode::medium;
+    bool vfg_auto_cut = true;
+    int multiplier = 2;  // --multiplier: real frames this many files apart
+    std::wstring adapter_name;  // --adapter: a GPU by (part of) its name
+    {
+        wchar_t text[MAX_PATH];
+        const DWORD len = GetEnvironmentVariableW(L"GLASIR_VFG_RUNTIME", text, MAX_PATH);
+        if (len > 0 && len < MAX_PATH) vfg_runtime = text;
+    }
     fs::path seq_dir;
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
@@ -168,10 +201,18 @@ int wmain(int argc, wchar_t **argv) {
         else if (a == L"--out" && i + 1 < argc) out_dir = argv[++i];
         else if (a == L"--methods" && i + 1 < argc) methods = argv[++i];
         else if (a == L"--profile") profile = true;
+        else if (a == L"--adapter" && i + 1 < argc) adapter_name = argv[++i];
         else if (a == L"--profile-layers") profile = true, interp_profile_layers = true;
         else if (a == L"--stats") show_stats = true;
         else if (a == L"--layers") show_layers = true;
         else if (a == L"--adjacent") adjacent = true;
+        else if (a == L"--vfg-runtime" && i + 1 < argc) vfg_runtime = argv[++i];
+        else if (a == L"--vfg-no-auto-cut") vfg_auto_cut = false;
+        else if (a == L"--multiplier" && i + 1 < argc) multiplier = std::clamp(_wtoi(argv[++i]), 2, 8);
+        else if (a == L"--vfg-mode" && i + 1 < argc) {
+            const std::wstring m = argv[++i];
+            vfg_mode = m == L"low" ? fg::VfgMode::low : m == L"high" ? fg::VfgMode::high : fg::VfgMode::medium;
+        }
         else if (a == L"--picture" && i + 4 < argc) {
             picture.x0 = UINT(_wtoi(argv[i + 1]));
             picture.y0 = UINT(_wtoi(argv[i + 2]));
@@ -200,8 +241,25 @@ int wmain(int argc, wchar_t **argv) {
     Gpu gpu;
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
     const UINT dev_flags = GetEnvironmentVariableW(L"FG_D3D_DEBUG", nullptr, 0) ? D3D11_CREATE_DEVICE_DEBUG : 0;
-    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, dev_flags, levels, 3, D3D11_SDK_VERSION,
-                                 &gpu.device, nullptr, &gpu.ctx))) {
+    // --adapter: the first GPU whose name has this in it (else the default one).
+    ComPtr<IDXGIAdapter1> chosen;
+    if (!adapter_name.empty()) {
+        ComPtr<IDXGIFactory1> factory;
+        CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+        ComPtr<IDXGIAdapter1> a;
+        for (UINT n = 0; factory && !chosen && factory->EnumAdapters1(n, &a) == S_OK; ++n, a.Reset()) {
+            DXGI_ADAPTER_DESC1 d{};
+            a->GetDesc1(&d);
+            if (!(d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && std::wstring(d.Description).find(adapter_name) != std::wstring::npos)
+                chosen = a;
+        }
+        if (!chosen) {
+            fwprintf(stderr, L"no GPU named like \"%s\"\n", adapter_name.c_str());
+            return 1;
+        }
+    }
+    if (FAILED(D3D11CreateDevice(chosen.Get(), chosen ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                                 dev_flags, levels, 3, D3D11_SDK_VERSION, &gpu.device, nullptr, &gpu.ctx))) {
         fwprintf(stderr, L"no D3D11 device\n");
         return 1;
     }
@@ -237,6 +295,8 @@ int wmain(int argc, wchar_t **argv) {
     wprintf(L"\n");
 
     fg::Interpolator interp;
+    fg::Vfg vfg;
+    bool vfg_ten_bit = false;
     interp.layer_profile = interp_profile_layers;
     for (auto &[name, value] : tuning) {
         if (name == L"radius_fine") interp.search_radius_fine = int(value);
@@ -341,7 +401,7 @@ int wmain(int argc, wchar_t **argv) {
             if (!fs::exists(clip / name) || !load_png(wic.Get(), clip / name, img)) break;
             frames.push_back(std::move(img));
         }
-        if (frames.size() < 3) continue;
+        if (frames.size() < size_t(adjacent ? 2 : multiplier + 1)) continue;
         const UINT w = frames[0].w, h = frames[0].h;
 
         std::string error;
@@ -371,10 +431,12 @@ int wmain(int argc, wchar_t **argv) {
         for (size_t m = 0; m < method_names.size(); ++m) {
             const std::wstring &method = method_names[m];
             Result r;
-            const size_t step = adjacent ? 1 : 2;
+            const size_t step = adjacent ? 1 : size_t(multiplier);
+            const int between = adjacent ? 1 : multiplier - 1;  // frames made for each pair
             interp.forget_history();
-            for (size_t i = 0; i + step < frames.size(); i += step) {
-                const Image &truth = frames[i + (adjacent ? 0 : 1)];
+            for (size_t i = 0; i + step < frames.size(); i += step)
+              for (int nth = 1; nth <= between; ++nth) {
+                const Image &truth = frames[i + (adjacent ? 0 : size_t(nth))];
                 const size_t next = i + step;
                 Image out;
                 out.w = w;
@@ -385,13 +447,39 @@ int wmain(int argc, wchar_t **argv) {
                     fg::DrawOptions o;
                     o.method = method == L"motion" ? fg::Method::motion : fg::Method::blend;
                     o.follows = i > 0;  // each pair starts on the frame the last one ended on
-                    // A few untimed runs first, then the timed one.
-                    for (int warm = 0; warm < 3; ++warm)
-                        interp.draw(gpu.ctx.Get(), srv[i].Get(), srv[next].Get(), rtv.Get(), o);
-                    r.ms.push_back(timed(gpu, [&] {
-                        interp.draw(gpu.ctx.Get(), srv[i].Get(), srv[next].Get(), rtv.Get(), o);
-                    }));
-                    if (o.method == fg::Method::motion) interp.keep_history(gpu.ctx.Get());
+                    if (!adjacent) {
+                        o.multiplier = multiplier;
+                        o.index = nth;
+                        o.t = float(nth) / float(multiplier);
+                        o.same_pair = nth > 1;
+                    }
+                    if (method == L"vfg") {
+                        std::string vfg_error;
+                        const bool ten_bit = frames[i].bits > 8;
+                        if ((!vfg.ready() || vfg.width() != w || vfg.height() != h || !(vfg.picture() == place) ||
+                             vfg_ten_bit != ten_bit) &&
+                            !vfg.create(gpu.device.Get(), w, h, ten_bit, vfg_runtime, vfg_mode, vfg_auto_cut, vfg_error, place)) {
+                            fprintf(stderr, "\nvfg: %s\n", vfg_error.c_str());
+                            return 1;
+                        }
+                        vfg_ten_bit = ten_bit;
+                        bool ok = vfg.draw(gpu.ctx.Get(), srv[i].Get(), srv[next].Get(), rtv.Get(), o, vfg_error);
+                        r.ms.push_back(timed(gpu, [&] {
+                            ok = ok && vfg.draw(gpu.ctx.Get(), srv[i].Get(), srv[next].Get(), rtv.Get(), o, vfg_error);
+                        }));
+                        if (!ok) {
+                            fprintf(stderr, "\nvfg: %s\n", vfg_error.c_str());
+                            return 1;
+                        }
+                    } else {
+                        // A few untimed runs first, then the timed one.
+                        for (int warm = 0; warm < 3; ++warm)
+                            interp.draw(gpu.ctx.Get(), srv[i].Get(), srv[next].Get(), rtv.Get(), o);
+                        r.ms.push_back(timed(gpu, [&] {
+                            interp.draw(gpu.ctx.Get(), srv[i].Get(), srv[next].Get(), rtv.Get(), o);
+                        }));
+                    }
+                    if (o.method == fg::Method::motion && nth == between) interp.keep_history(gpu.ctx.Get());
                     if (show_stats && o.method == fg::Method::motion && interp.stats_texture()) {
                         D3D11_TEXTURE2D_DESC sd{};
                         interp.stats_texture()->GetDesc(&sd);
@@ -508,10 +596,11 @@ int wmain(int argc, wchar_t **argv) {
                     if (adjacent)
                         name += L"_adj" + std::to_wstring(i + 1) + std::to_wstring(i + 2);
                     else if (i > 0)
-                        name += L"_" + std::to_wstring(i / 2 + 1);
+                        name += L"_" + std::to_wstring(i / step + 1);
+                    if (between > 1) name += L"_" + std::to_wstring(nth) + L"of" + std::to_wstring(multiplier);
                     save_png(wic.Get(), fs::path(out_dir) / (name + L".png"), out);
                 }
-            }
+              }
             const double avg = r.psnr_n ? r.psnr_sum / r.psnr_n : INFINITY;
             totals[m] += std::isinf(avg) ? 99.0 : avg;
             std::sort(r.ms.begin(), r.ms.end());

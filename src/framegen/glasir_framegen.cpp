@@ -16,6 +16,9 @@
 //
 // The frame in between is motion-compensated (fg_interp.h, flow.hlsl; the
 // design and measurements are in README.md); Method=blend mixes A and B 50/50.
+// Method=vfg has NVIDIA's Video Frame Generation make it instead (fg_vfg.h),
+// where its DLLs are installed and the GPU is an RTX 40 or 50; where not, or
+// when it fails, the motion-compensated one takes over.
 //
 // It only makes sense when mpv gets real frames, not the pairs of repeats a 30
 // fps game captured at 60 arrives as. Glasir's dedup sends only new
@@ -48,6 +51,7 @@
 #include <reshade.hpp>
 
 #include "fg_interp.h"
+#include "fg_vfg.h"
 #include "framegen_link.h"
 #include "overlay.h"
 #include "reshade_ui.h"
@@ -90,6 +94,15 @@ struct Settings {
     bool edge_rules = true;       // the strip along the frame's edges that only one frame shows in a camera turn
     bool still_hud = true;        // a HUD over fast scenery is held where it is
     bool history_search = false;  // a test: the search also tries what each block did over the last pair
+    // Method=vfg: NVIDIA's Video Frame Generation makes the frame in between (fg_vfg.h); `method` is
+    // then what takes over where it cannot run.
+    bool vfg = false;
+    fg::VfgMode vfg_mode = fg::VfgMode::medium;  // VfgQuality=low|medium|high: its model's size
+    bool vfg_auto_cut = true;   // VfgAutoCut: its own cut detection (frame A again across a cut)
+    std::string vfg_runtime;    // VfgRuntime: the folder with its DLLs; empty: nvidia-vfg beside mpv.exe
+    // Multiplier=2|3|4: frames shown for each of the source's - one, two or three of them generated -
+    // or as many as the display can show. 3 and 4 are there for whoever wants them, as they are.
+    int multiplier = 2;
     std::string mpv_pipe = "glasir";
 };
 
@@ -184,6 +197,8 @@ void load_settings() {
     setting("LogStats", s.log_stats);
     setting("MaxOutputHz", s.max_output_hz);
     setting("ResetMs", s.reset_ms);
+    setting("Multiplier", s.multiplier);
+    s.multiplier = std::clamp(s.multiplier, 2, 4);
     setting("ToggleKey", s.toggle_key);
     setting("MpvPipe", s.mpv_pipe);
     setting("CaptureKey", s.capture_key);
@@ -201,8 +216,23 @@ void load_settings() {
         s.method = fg::Method::blend;
     else if (method == "motion")
         s.method = fg::Method::motion;
+    else if (method == "vfg")
+        s.vfg = true;
     else
         bad_setting("Method", method);
+    std::string vfg_quality = "medium";
+    setting("VfgQuality", vfg_quality);
+    for (auto &c : vfg_quality) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    if (vfg_quality == "low")
+        s.vfg_mode = fg::VfgMode::low;
+    else if (vfg_quality == "medium")
+        s.vfg_mode = fg::VfgMode::medium;
+    else if (vfg_quality == "high")
+        s.vfg_mode = fg::VfgMode::high;
+    else
+        bad_setting("VfgQuality", vfg_quality);
+    setting("VfgAutoCut", s.vfg_auto_cut);
+    read_text("VfgRuntime", s.vfg_runtime);  // not written back: empty is the folder beside mpv.exe
     std::string quality = s.fast ? "fast" : "high";
     setting("Quality", quality);
     for (auto &c : quality) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
@@ -214,6 +244,30 @@ void load_settings() {
     // The launcher passes the full \\.\pipe\name form to mpv; take that too.
     const std::string prefix = "\\\\.\\pipe\\";
     if (s.mpv_pipe.compare(0, prefix.size(), prefix) == 0) s.mpv_pipe.erase(0, prefix.size());
+}
+
+// Method=vfg: the folder with the DLLs of NVIDIA's Video Frame Generation -
+// GLASIR_VFG_RUNTIME (tests), VfgRuntime, or nvidia-vfg beside mpv.exe, where
+// Glasir's setup puts them.
+std::wstring vfg_runtime_folder() {
+    wchar_t text[MAX_PATH] = {};
+    const DWORD len = GetEnvironmentVariableW(L"GLASIR_VFG_RUNTIME", text, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) return text;
+    if (!g_settings.vfg_runtime.empty()) {
+        const std::string &utf8 = g_settings.vfg_runtime;
+        const int n = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), int(utf8.size()), nullptr, 0);
+        std::wstring wide(size_t(n > 0 ? n : 0), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, utf8.data(), int(utf8.size()), wide.data(), n);
+        return wide;
+    }
+    GetModuleFileNameW(nullptr, text, MAX_PATH);
+    std::wstring folder(text);
+    folder.erase(folder.find_last_of(L"\\/") + 1);
+    return folder + L"nvidia-vfg";
+}
+
+const char *vfg_quality_name() {
+    return g_settings.vfg_mode == fg::VfgMode::low ? "low" : g_settings.vfg_mode == fg::VfgMode::high ? "high" : "medium";
 }
 
 // ---- Time ----------------------------------------------------------------------
@@ -786,8 +840,9 @@ void write_trace(const TraceLine &l) {
 // A held real frame: its fence value, when to let it go, and its trace line.
 struct HoldJob {
     uint64_t n = 0;
-    double half = 0;    // this long after the frame in between is done
-    double latest = 0;  // but no later than this
+    double half = 0;    // this long after the frame before it is done (a step: half an interval at 2x)
+    double latest = 0;  // the real frame no later than this
+    int left = 1;       // frames still to let go for this real frame, this one included
     TraceLine line;
 };
 
@@ -1038,7 +1093,10 @@ void Hold::loop() {
         const UINT64 completed = drawn_->GetCompletedValue();
         const bool drawn = completed >= job.n && completed != UINT64_MAX;
         const double drawn_at = qpc_seconds();
-        const double target = drawn && !stopping_ ? std::min(drawn_at + job.half, job.latest) : drawn_at;
+        // A step after the frame before was done - or, with less time than that for each frame
+        // still to go before `latest`, an equal share of what is left.
+        const double step = std::min(job.half, std::max(0.0, job.latest - drawn_at) / std::max(1, job.left));
+        const double target = drawn && !stopping_ ? drawn_at + step : drawn_at;
         if (!released(job.n)) sleeper.until(target);
         // Let go meanwhile with a later frame (queue full, a resize): not timed
         // here. Otherwise let go now - also when stopping, in case stop()'s
@@ -1057,7 +1115,7 @@ void Hold::loop() {
                 ++stats_.drawn;
                 stats_.drawn_sum += drawn_at - job.line.now;
                 stats_.held_sum += out_at - drawn_at;
-                if (drawn_at + job.half > job.latest) ++(job.latest > drawn_at ? stats_.early : stats_.overdue);
+                if (step < job.half) ++(job.latest > drawn_at ? stats_.early : stats_.overdue);
             }
             if (!gone && out) {
                 ++stats_.timed;
@@ -1236,9 +1294,23 @@ public:
         if (now < paused_until_) {
             s.kind = s.Paused;
             s.seconds_left = paused_until_ - now;
-        } else if (interval_ > 0 && max_hz_ > 0 && 2.0 / interval_ > max_hz_ * 1.05) {
-            s.kind = s.TooFast;
+        } else if (interval_ > 0 && max_hz_ > 0) {
+            const int shown = fitting(interval_, max_hz_, g_settings.multiplier);  // what the display can show
+            const int frames = std::min(shown, limit_);                            // ... and the GPU keeps up with
             s.display_hz = max_hz_;
+            s.frames = frames;
+            s.wanted = g_settings.multiplier;
+            if (shown < 2) {
+                s.kind = s.TooFast;
+            } else if (frames < shown) {
+                s.kind = s.Behind;
+            } else if (shown < g_settings.multiplier) {
+                s.kind = s.Fewer;
+            } else if (frames > 2 && made_ >= 0 && made_ < 0.85 * (frames - 1)) {
+                s.kind = s.Short;
+                s.fps = (1.0 + made_) / interval_;
+                s.target_fps = frames / interval_;
+            }
         }
         return s;
     }
@@ -1249,11 +1321,19 @@ public:
     }
     // For the panel on ReShade's Add-ons page (draw_panel() below), on mpv's
     // render thread like the rest: the switches, changed while playing.
+    // NVIDIA's filter in place of interp_, and its model's size (the menu).
+    void set_vfg(bool on);
+    // 2, 3 or 4 frames for each of the source's (the menu).
+    void set_multiplier(int frames);
+    void set_vfg_mode(fg::VfgMode mode);
     void set_history_search(bool on);
     void set_picture_only(bool on);
     void set_edge_rules(bool on);
     void set_still_hud(bool on);
     bool broken() const { return broken_; }
+    // Method=vfg, for the panel: 1 = NVIDIA's filter makes the frames, 0 = not
+    // started yet, -1 = it could not (ReShade.log says why): Glasir's own does.
+    int vfg_state() const { return vfg_.ready() && !vfg_broken_ ? 1 : (vfg_broken_ || vfg_failed_ ? -1 : 0); }
     // What the generator works on: the back buffer's size (0: none yet) and
     // the picture's place in it (all 0: the whole of it).
     void working_on(UINT &width, UINT &height, fg::Picture &picture) const {
@@ -1286,6 +1366,8 @@ public:
         for (auto &t : frames_) t.Reset();
         for (auto &v : views_) v.Reset();
         interp_.release();
+        vfg_.release();
+        vfg_failed_ = vfg_broken_ = false;
         hold_.stop();
         context_.Reset();
         device_.Reset();
@@ -1304,7 +1386,53 @@ private:
     bool init(ID3D11Device *device);
     bool ensure_frames(const D3D11_TEXTURE2D_DESC &bb);
     void follow_picture(const D3D11_TEXTURE2D_DESC &bb);
-    bool draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool follows, bool keep);
+    bool use_vfg();
+    bool draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool follows, bool keep, int index, int frames);
+    // Multiplier, or the most frames for each of the source's that the
+    // display can show; 1: not even two.
+    static int fitting(double interval, int max_hz, int most) {
+        for (int frames = most; frames >= 2; --frames)
+            if (frames / interval <= max_hz * 1.05) return frames;
+        return 1;
+    }
+    // A setting of frame generation changed: what mpv could not keep up with
+    // may be gone with it, so it is tried at once, not after the pause - and
+    // with all the frames chosen again.
+    void retry_now() {
+        paused_until_ = settle_until_ = 0;
+        backoff_ = 5.0;
+        drop_times_[0] = drop_times_[1] = -1e9;
+        all_frames_again();
+        limit_wait_ = kLimitWait;
+        limit_said_ = 4;
+    }
+    // 3x and 4x step down while the GPU cannot hold them (on_reshade_present):
+    // back to what was chosen, to see whether it holds now.
+    void all_frames_again() {
+        limit_ = 4;
+        strain_ = 0;
+        made_ = -1;
+    }
+    // `frames` for each real frame cannot be held (why): one fewer, for a
+    // while. Said in a toast the first time, in the log every time, and in the
+    // menu for as long as it lasts.
+    void fewer_frames(int frames, double now, const char *why) {
+        limit_ = std::max(2, frames - 1);
+        limit_until_ = now + limit_wait_;
+        limit_neural_ = neural_now_;
+        strain_ = 0;
+        made_ = -1;
+        log_line(reshade::log::level::warning, "%dx cannot be held (%s): %dx for the next %.0f s", frames, why, limit_,
+                 limit_wait_);
+        if (limit_ < limit_said_) {  // not again at every later try
+            limit_said_ = limit_;
+            char text[96];
+            snprintf(text, sizeof(text), "Frame generation: %dx (the GPU cannot hold %dx here)", limit_,
+                     g_settings.multiplier);
+            glasir::overlay::toast(text, 3.0);
+        }
+        limit_wait_ = std::min(limit_wait_ * 2.0, 300.0);
+    }
     void reset_history() {
         prev_ = -1;
         dt_interval_ = 0;
@@ -1367,6 +1495,19 @@ private:
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
     fg::Interpolator interp_;  // makes the frame in between (fg_interp.h)
+    // Method=vfg: NVIDIA's filter makes it instead (fg_vfg.h), for the back
+    // buffer and picture interp_ is made for. It did not start for this size,
+    // format and picture (vfg_failed_: tried again when one changes), or failed
+    // while drawing (vfg_broken_: not again until the device goes): interp_
+    // makes the frames, which is why it is always made too.
+    fg::Vfg vfg_;
+    DXGI_FORMAT vfg_format_ = DXGI_FORMAT_UNKNOWN;
+    bool vfg_failed_ = false, vfg_broken_ = false;
+    UINT vfg_failed_w_ = 0, vfg_failed_h_ = 0;
+    DXGI_FORMAT vfg_failed_format_ = DXGI_FORMAT_UNKNOWN;
+    fg::Picture vfg_failed_picture_;
+    int vfg_profile_ = -1, vfg_stage_n_ = 0;  // GLASIR_VFG_PROFILE: -1 = not read yet
+    double vfg_stage_sum_[3] = {};
 
     // The last two real frames, as copied out of the back buffer, and whether
     // ReShade's effects ran for each. Frames are only mixed with frames of the
@@ -1407,6 +1548,19 @@ private:
     fg::Picture picture_seen_, picture_made_, picture_failed_;
     int picture_steady_ = 0;
     int pending_slot_ = 0;
+    int pending_frames_ = 2;  // frames shown for this real frame, itself included (Multiplier, or fewer)
+    // 3x and 4x the GPU cannot hold (the frames of one real frame still queued when the next comes, which
+    // then gets none): limit_ is the most frames shown for now, strain_ counts such frames, the limit is
+    // lifted for a try at limit_until_, each time after twice as long (limit_wait_), or when ReShade's
+    // effects start or stop running (limit_neural_: DLSS 5 switched in the menu). made_: frames in between
+    // for each real frame lately.
+    static constexpr double kLimitWait = 20.0;
+    int limit_ = 4, strain_ = 0;
+    double limit_until_ = 0, limit_wait_ = kLimitWait;
+    bool limit_neural_ = false;
+    bool neural_now_ = false;  // ReShade's effects ran for the frame being presented
+    int limit_said_ = 4;       // the lowest limit a toast has told of since a setting changed
+    double made_ = -1;
     double pending_target_ = 0, pending_since_ = 0;
     double pending_now_ = 0, pending_dt_ = 0, pending_half_ = 0, pending_latest_ = 0;
     int pending_queued_ = -1;
@@ -1443,6 +1597,7 @@ private:
              skipped_paused_ = 0, skipped_backoff_ = 0, skipped_settle_ = 0, late_frames_ = 0, drops_ = 0;
     double late_max_ = 0, late_sum_ = 0, mpv_present_max_ = 0, mpv_present_sum_ = 0;
     double out_max_ = 0;  // the real frame's copy and present on mpv's thread, held
+    unsigned vfg_generated_ = 0;  // frames in between that NVIDIA's filter made
 };
 
 FrameGen g_gen;
@@ -1577,17 +1732,58 @@ void FrameGen::follow_picture(const D3D11_TEXTURE2D_DESC &bb) {
     reset_history();
 }
 
-// Draws the frame in between frames_[a] and frames_[b] into the back buffer.
+// Method=vfg: NVIDIA's filter for this back buffer and picture, made at the
+// first frame in between that needs it (its model takes a moment to load).
+// False: interp_ makes the frame; why is logged once for each size.
+bool FrameGen::use_vfg() {
+    if (!g_settings.vfg || vfg_broken_) return false;
+    if (vfg_.ready() && vfg_.width() == width_ && vfg_.height() == height_ && vfg_format_ == format_ &&
+        vfg_.picture() == picture_made_)
+        return true;
+    if (vfg_failed_ && vfg_failed_w_ == width_ && vfg_failed_h_ == height_ && vfg_failed_format_ == format_ &&
+        vfg_failed_picture_ == picture_made_)
+        return false;
+    std::string error;
+    bool ten_bit = false;
+    if (!fg::Vfg::takes(format_, ten_bit))
+        error = "it does not take this picture format";
+    else if (vfg_.create(device_.Get(), width_, height_, ten_bit, vfg_runtime_folder(), g_settings.vfg_mode,
+                         g_settings.vfg_auto_cut, error, picture_made_)) {
+        vfg_format_ = format_;
+        vfg_failed_ = false;
+        const fg::Picture &p = picture_made_;
+        log_line(reshade::log::level::info,
+                 "Method=vfg: NVIDIA Video Frame Generation %s makes the frames in between (quality %s, %ux%u, %d-bit)",
+                 vfg_.version().c_str(), vfg_quality_name(), p.x1 ? p.x1 - p.x0 : width_, p.x1 ? p.y1 - p.y0 : height_,
+                 ten_bit ? 10 : 8);
+        return true;
+    }
+    vfg_failed_ = true;
+    vfg_failed_w_ = width_;
+    vfg_failed_h_ = height_;
+    vfg_failed_format_ = format_;
+    vfg_failed_picture_ = picture_made_;
+    log_line(reshade::log::level::warning,
+             "Method=vfg: NVIDIA Video Frame Generation did not start (%s); Glasir's own frame generation makes the frames",
+             error.c_str());
+    return false;
+}
+
+// Draws a frame in between frames_[a] and frames_[b] into the back buffer:
+// `index` of the `frames - 1` the pair gets (the only one at 2x, half-way).
 // follows: the last call drew the pair that ended on frames_[a] and kept its
 // motion; keep: this pair's motion is worth keeping for the next one.
-bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool follows, bool keep) {
+bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool follows, bool keep, int index, int frames) {
     ComPtr<ID3D11RenderTargetView> rtv;
     HRESULT hr = device_->CreateRenderTargetView(back_buffer, nullptr, &rtv);
     if (FAILED(hr)) return fail("CreateRenderTargetView", hr), false;
 
     fg::DrawOptions o;
     o.method = g_settings.method;
-    o.t = 0.5f;
+    o.index = index;
+    o.multiplier = frames;
+    o.t = float(index) / float(frames);
+    o.same_pair = index > 1;  // the frames of the draw before, for the pair's next frame
     o.follows = follows;
     o.marker = g_settings.marker;
     o.marker_level = 0.75f;                                                // sRGB-encoded
@@ -1595,6 +1791,33 @@ bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool fol
     if (format_ == DXGI_FORMAT_R16G16B16A16_FLOAT) o.marker_level = 1.0f;  // scRGB, 80 nits
 
     StateBackup backup(context_.Get());
+    if (use_vfg()) {
+        std::string error;
+        if (vfg_.draw(context_.Get(), views_[a].Get(), views_[b].Get(), rtv.Get(), o, error)) {
+            ++vfg_generated_;
+            // GLASIR_VFG_PROFILE=1 (a developer's look, never in a user's log): where the calling
+            // thread's time went, averaged over 150 frames in between.
+            if (vfg_profile_ < 0) vfg_profile_ = GetEnvironmentVariableW(L"GLASIR_VFG_PROFILE", nullptr, 0) > 0 ? 1 : 0;
+            if (vfg_profile_ > 0) {
+                for (int i = 0; i < 3; ++i) vfg_stage_sum_[i] += vfg_.stage_ms()[i];
+                if (++vfg_stage_n_ == 150) {
+                    log_line(reshade::log::level::info,
+                             "GLASIR_VFG_PROFILE: per frame in between, waiting for the buffers %.2f ms, the filter %.2f ms, "
+                             "handing them back %.2f ms",
+                             vfg_stage_sum_[0] / 150, vfg_stage_sum_[1] / 150, vfg_stage_sum_[2] / 150);
+                    vfg_stage_sum_[0] = vfg_stage_sum_[1] = vfg_stage_sum_[2] = 0;
+                    vfg_stage_n_ = 0;
+                }
+            }
+            return true;
+        }
+        // The back buffer still holds the real frame: interp_ draws over it.
+        vfg_broken_ = true;
+        vfg_.release();
+        log_line(reshade::log::level::error,
+                 "Method=vfg: NVIDIA Video Frame Generation failed (%s); Glasir's own frame generation from here on",
+                 error.c_str());
+    }
     interp_.draw(context_.Get(), views_[a].Get(), views_[b].Get(), rtv.Get(), o);
     if (g_settings.history_search && keep && o.method == fg::Method::motion) {
         interp_.keep_history(context_.Get());
@@ -1654,7 +1877,45 @@ void FrameGen::set_fast(bool fast) {
     interp_.warp_taps = fast ? 1 : 5;
     interp_.soft_temp = fast ? 0.02f : 0.04f;
     reshade::set_config_value(nullptr, kSection, "Quality", fast ? "fast" : "high");
+    retry_now();
     log_line(reshade::log::level::info, "quality %s", fast ? "fast" : "high");
+}
+
+// Read at every frame, so it changes at once.
+void FrameGen::set_multiplier(int frames) {
+    frames = std::clamp(frames, 2, 4);
+    if (frames == g_settings.multiplier) return;
+    g_settings.multiplier = frames;
+    reshade::set_config_value(nullptr, kSection, "Multiplier", std::to_string(frames).c_str());
+    retry_now();
+    log_line(reshade::log::level::info, "Multiplier=%d (from the menu)", frames);
+}
+
+// From the menu: NVIDIA's filter makes the frames in between, or interp_
+// again. The filter is made at the next frame in between (use_vfg) and let
+// go at once when it is no longer wanted; one that did not start gets
+// another try.
+void FrameGen::set_vfg(bool on) {
+    if (on == g_settings.vfg) return;
+    g_settings.vfg = on;
+    reshade::set_config_value(nullptr, kSection, "Method",
+                              on ? "vfg" : g_settings.method == fg::Method::blend ? "blend" : "motion");
+    if (!on) vfg_.release();
+    vfg_failed_ = false;
+    retry_now();
+    log_line(reshade::log::level::info, "Method=%s (from the menu)", on ? "vfg" : "motion");
+}
+
+// The filter loads one model: it is made anew with the other at the next
+// frame in between.
+void FrameGen::set_vfg_mode(fg::VfgMode mode) {
+    if (mode == g_settings.vfg_mode) return;
+    g_settings.vfg_mode = mode;
+    reshade::set_config_value(nullptr, kSection, "VfgQuality", vfg_quality_name());
+    vfg_.release();
+    vfg_failed_ = false;
+    retry_now();
+    log_line(reshade::log::level::info, "VfgQuality=%s (from the menu)", vfg_quality_name());
 }
 
 // From the panel. A check (DebugMarker, LogStats) is kept in ReShade.ini as
@@ -1728,6 +1989,13 @@ void FrameGen::watch_drops(double now, bool stalled) {
     drop_times_[0] = drop_times_[1];
     drop_times_[1] = now;
     if (fresh < 2 && now - drop_times_[0] > 2.0) return;
+    // At 3x and 4x, fewer frames first: 2x may well hold where they do not.
+    if (pending_frames_ > 2) {
+        fewer_frames(pending_frames_, now, "mpv dropped new frames while generating");
+        drop_times_[0] = drop_times_[1] = -1e9;  // a drop from before does not pair with one after
+        settle_until_ = now + 0.5;
+        return;
+    }
     paused_until_ = now + backoff_;
     log_line(reshade::log::level::warning,
              "mpv fell behind the source (new frames dropped while generating); frame generation paused for %.0f s",
@@ -1750,6 +2018,7 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
 
     // Whatever the effects did, it was for this frame only.
     const bool neural = effects_ran_;
+    neural_now_ = neural;
     effects_ran_ = false;
     const bool history = history_fresh_;
     history_fresh_ = false;  // until this present draws a pair
@@ -1854,12 +2123,22 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
 
     int queued = -1;
     bool generate = prev_ >= 0 && interval_ > 0;
-    if (generate && 2.0 / interval_ > max_hz * 1.05) {
+    // A lower rate taken because the GPU could not hold the one chosen is tried again after a while,
+    // and at once when the effects run where they did not, or the other way (DLSS 5 switched on or off).
+    if (limit_ < 4 && (now >= limit_until_ || neural != limit_neural_)) {
+        log_line(reshade::log::level::info, "trying %dx again", g_settings.multiplier);
+        all_frames_again();
+    }
+    // Multiplier frames for each of the source's, or as many as the display shows and the GPU holds.
+    const int frames = generate ? fitting(interval_, max_hz, std::min(g_settings.multiplier, limit_)) : 1;
+    if (generate && frames < 2) {
         generate = false;  // the display cannot show twice this rate
         ++skipped_fast_;
     }
+    bool source_paused = false;
     if (generate && g_link.linked() && g_link.since_last(now) > std::max(reset, 3.0 * interval_)) {
         generate = false;  // the source is paused: this is a keepalive repeat
+        source_paused = true;
         ++skipped_paused_;
     }
     if (generate && now < paused_until_) {
@@ -1877,15 +2156,29 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
     if (generate && (queued = queued_presents(swapchain)) >= 2) {
         generate = false;  // the screen is behind: another present would only wait
         ++skipped_queue_;
+        // At 3x and 4x that is the frames of the real frame before, still waiting: the GPU was done with
+        // its first one too late for the others to fit (DLSS 5 takes most of the interval). Every other
+        // real frame then gets none - three frames and a long one, which looks worse than 2x. After a few
+        // of these the rate goes down by one, to what holds steady.
+        if (frames > 2 && (strain_ += 3) >= 18)
+            fewer_frames(frames, now, "frames were still queued when the next real frame came");
+    } else if (generate && strain_ > 0) {
+        --strain_;
+    }
+    // How many frames in between a real frame gets lately, for the menu (3x and 4x that fall short).
+    if (prev_ >= 0 && interval_ > 0 && !source_paused) {
+        const double made = generate ? frames - 1 : 0;
+        made_ = made_ < 0 ? made : made_ * 0.93 + made * 0.07;
     }
 
     // The last pair's motion says where things go on to only at an even pace:
     // a late frame, or mpv drawing the same frame again for its OSD, is a pair
     // of another length.
     const bool steady = interval_ > 0 && dt > 0.5 * interval_ && dt < 1.5 * interval_;
-    if (generate && draw_between(back_buffer.Get(), prev_, cur, history && steady, steady)) {
+    if (generate && draw_between(back_buffer.Get(), prev_, cur, history && steady, steady, 1, frames)) {
         pending_ = true;
         pending_slot_ = cur;
+        pending_frames_ = frames;
         // The real frame goes out half an interval after the frame in between
         // (never more than 40 ms: below 12.5 fps there is little left to
         // smooth): held, half an interval after it was done; else half an
@@ -1898,9 +2191,12 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
         // (this present may be an OSD redraw that carries none). When that
         // cannot be told, no later than the old time.
         constexpr double kNextEffectsMargin = 0.0005;
-        pending_half_ = std::min(interval_ * 0.5, 0.04);
+        // At 3x and 4x the step is a third or a quarter of the interval, and the frames after the
+        // first one in between follow a step apart (finish_present).
+        pending_half_ = std::min(interval_, 0.08) / frames;
         pending_target_ = now + pending_half_;
-        pending_latest_ = pending_target_;
+        // The real frame is the last of them: frames - 1 steps from now.
+        pending_latest_ = now + (frames - 1) * pending_half_;
         const double soonest = g_link.shortest_recent_gap(reset);
         if (soonest > 0 && source_age_ >= 0 && arrival_to_present_ >= 0)
             pending_latest_ = now - source_age_ + soonest + arrival_to_present_ - kNextEffectsMargin;
@@ -1908,7 +2204,7 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
         pending_dt_ = dt;
         pending_swapchain_ = swapchain;
         pending_since_ = qpc_seconds();
-        ++generated_;
+        ++generated_;  // the others as they are drawn (finish_present)
     }
     generated_last_ = pending_;
     // GLASIR_FRAMEGEN_CAPTURE_AFTER=<seconds>: a capture that many seconds after
@@ -1969,36 +2265,54 @@ void FrameGen::on_finish_present(reshade::api::swapchain *api_swapchain) {
             log_line(reshade::log::level::warning,
                      "the real frame cannot be held on the GPU (%s); it is timed from mpv's present", error.c_str());
     }
-    // Sync interval 1, like mpv: a 0 could drop a frame in between still
-    // queued, and more than 1 would hold the real frame longer than its half.
-    if (hold_.active()) {
+    // The frames still to show for this real frame, each a step after the
+    // one before it: the other frames in between (3x and 4x), then the real
+    // frame itself. Sync interval 1, like mpv: a 0 could drop a frame still
+    // queued, and more than 1 would hold a frame longer than its step.
+    const int a = 1 - pending_slot_, b = pending_slot_;
+    for (int index = 2; index <= pending_frames_; ++index) {
+        // After each present, buffer 0 is the next buffer in the chain.
+        if (index > 2 && FAILED(swapchain->GetBuffer(0, IID_PPV_ARGS(back_buffer.ReleaseAndGetAddressOf())))) {
+            trace(pending_now_, pending_dt_, pending_queued_, "generated-real-lost");
+            break;
+        }
+        const bool held = hold_.active();
         HoldJob job;
-        job.n = hold_.mark_drawn();
-        context_->CopyResource(back_buffer.Get(), frames_[pending_slot_].Get());
+        if (held) job.n = hold_.mark_drawn();
+        // The real frame last - and at once, in place of a frame in between that could not be drawn.
+        const bool real =
+            index == pending_frames_ || !draw_between(back_buffer.Get(), a, b, false, false, index, pending_frames_);
+        if (real) context_->CopyResource(back_buffer.Get(), frames_[b].Get());
         glasir::overlay::draw_again(context_.Get(), back_buffer.Get());
-        hold_.wait_release(job.n);
-        const HRESULT hr = swapchain->Present(1, 0);
-        // Let go even if the present failed: the wait is queued either way.
-        job.half = pending_half_;
-        job.latest = pending_latest_;
-        job.line = trace_line(pending_now_, pending_dt_, pending_queued_, "generated");
-        hold_.let_go(job);
-        out_max_ = std::max(out_max_, qpc_seconds() - returned);
-        if (FAILED(hr)) fail("Present of the real frame", hr);
-        stats(qpc_seconds());
-        return;
+        const char *what = real ? "generated" : "generated-between";
+        if (!real) ++generated_;
+        HRESULT hr = S_OK;
+        if (held) {
+            hold_.wait_release(job.n);
+            hr = swapchain->Present(1, 0);
+            // Let go even if the present failed: the wait is queued either way.
+            job.half = pending_half_;
+            job.latest = pending_latest_;
+            job.left = pending_frames_ - index + 1;
+            job.line = trace_line(pending_now_, pending_dt_, pending_queued_, what);
+            hold_.let_go(job);
+        } else {
+            const double target = pending_target_ + (index - 2) * pending_half_;
+            sleeper_.until(target);
+            const double out = qpc_seconds();
+            late_max_ = std::max(late_max_, out - target);
+            late_sum_ += out - target;
+            hr = swapchain->Present(1, 0);
+            trace(pending_now_, pending_dt_, pending_queued_, what, out - pending_now_);
+        }
+        if (FAILED(hr)) {
+            fail("Present after the frame in between", hr);
+            break;
+        }
+        if (real) break;
     }
-    context_->CopyResource(back_buffer.Get(), frames_[pending_slot_].Get());
-    glasir::overlay::draw_again(context_.Get(), back_buffer.Get());
-    sleeper_.until(pending_target_);
-    const double out = qpc_seconds();
-    const double late = out - pending_target_;
-    late_max_ = std::max(late_max_, late);
-    late_sum_ += late;
-    const HRESULT hr = swapchain->Present(1, 0);
-    if (FAILED(hr)) fail("Present of the real frame", hr);
-    trace(pending_now_, pending_dt_, pending_queued_, "generated", out - pending_now_);
-    stats(qpc_seconds());  // no ReShade lock held here, both frames queued
+    out_max_ = std::max(out_max_, qpc_seconds() - returned);
+    stats(qpc_seconds());  // no ReShade lock held here, the frames are queued
 }
 
 void FrameGen::stats(double now) {
@@ -2019,12 +2333,18 @@ void FrameGen::stats(double now) {
             snprintf(out, sizeof(out), "real frame held on the GPU: none in this window");
         } else if (hold_.active()) {
             const double d = held.drawn ? double(held.drawn) : 1.0;
+            // How long the frame in between took is left out while NVIDIA's filter makes it: its
+            // licence keeps performance data of its software out of what users send to others, and
+            // this log goes into bug reports.
+            char done[64] = "";
+            if (vfg_generated_ == 0)
+                snprintf(done, sizeof(done), " (done %.2f ms avg after the add-on drew it)", held.drawn_sum / d * 1000.0);
             snprintf(out, sizeof(out),
-                     "real frame held on the GPU %.2f ms avg after the frame in between was done (done %.2f ms "
-                     "avg after the add-on drew it), let go %.3f ms late avg, %.3f max; of %u: %u timed (%u of "
+                     "real frame held on the GPU %.2f ms avg after the frame in between was done%s, let go %.3f ms "
+                     "late avg, %.3f max; of %u: %u timed (%u of "
                      "them let go early for the next frame, %u already due when done), %u without the done "
                      "signal, %u with a later frame (queue full, resize); queued in %.2f ms max",
-                     held.held_sum / d * 1000.0, held.drawn_sum / d * 1000.0,
+                     held.held_sum / d * 1000.0, done,
                      held.late_sum / (held.timed ? double(held.timed) : 1.0) * 1000.0, held.late_max * 1000.0,
                      held.frames, held.drawn, held.early, held.overdue, held.not_drawn, held.at_once,
                      out_max_ * 1000.0);
@@ -2048,6 +2368,7 @@ void FrameGen::stats(double now) {
     late_frames_ = drops_ = 0;
     late_max_ = late_sum_ = mpv_present_max_ = mpv_present_sum_ = 0;
     out_max_ = 0;
+    vfg_generated_ = 0;
 }
 
 // ---- ReShade events -----------------------------------------------------------
@@ -2114,6 +2435,18 @@ void draw_panel(reshade::api::effect_runtime *) {
     else {
         snprintf(line, sizeof(line), "On: %.1f real + %.1f generated frames a second.", real, generated);
         ui::text(line);
+    }
+    if (g_settings.vfg && g_gen.ready() && g_settings.enabled) {
+        const int state = g_gen.vfg_state();
+        if (state > 0)
+            snprintf(line, sizeof(line), "Frames in between by NVIDIA Video Frame Generation (quality %s).", vfg_quality_name());
+        else if (state < 0)
+            snprintf(line, sizeof(line), "NVIDIA Video Frame Generation could not run (see ReShade.log): Glasir's own makes the frames.");
+        else
+            snprintf(line, sizeof(line), "NVIDIA Video Frame Generation (quality %s) starts with the first frame in between.",
+                     vfg_quality_name());
+        ui::text(line);
+        if (state >= 0) ui::note("Edge rules, Still HUD and History search below are of Glasir's own generator.");
     }
     UINT width = 0, height = 0;
     fg::Picture picture;
@@ -2208,6 +2541,20 @@ void set_menu_host() {
     host.set_framegen_enabled = [](bool on) { g_gen.set_enabled(on); };
     host.framegen_fast = [] { return g_settings.fast; };
     host.set_framegen_fast = [](bool fast) { g_gen.set_fast(fast); };
+    host.multiplier = [] { return g_settings.multiplier; };
+    host.set_multiplier = [](int frames) { g_gen.set_multiplier(frames); };
+    // Whether NVIDIA's filter is installed is looked at once: setup runs while mpv does not.
+    host.nvidia_offered = [] {
+        static const bool installed = fg::Vfg::runtime_present(vfg_runtime_folder());
+        return installed;
+    };
+    host.framegen_nvidia = [] { return g_settings.vfg; };
+    host.set_framegen_nvidia = [](bool on) { g_gen.set_vfg(on); };
+    host.nvidia_quality = [] { return int(g_settings.vfg_mode); };
+    host.set_nvidia_quality = [](int quality) {
+        g_gen.set_vfg_mode(quality <= 0 ? fg::VfgMode::low : quality >= 2 ? fg::VfgMode::high : fg::VfgMode::medium);
+    };
+    host.nvidia_state = [] { return g_gen.vfg_state(); };
     host.rates = [](double &source, double &real, double &generated) { g_gen.rates(source, real, generated); };
     host.framegen_status = [] { return g_gen.status(); };
     host.mpv_pipe = g_settings.mpv_pipe;

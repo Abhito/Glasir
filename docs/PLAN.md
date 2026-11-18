@@ -20,6 +20,8 @@ credit. MPV-SW-Capture stays the owner's daily app until this one replaces it.
 - Windows 11 only (for now).
 - Engine: mpv + ReShade add-ons (kept for v1; a native renderer may come later).
 - One GPU. Second-GPU offload (frame gen / depth on another GPU) is a later add-on.
+  *(Frame generation on a second GPU was measured 2026-11-17 and not built:
+  docs/FRAMEGEN-LEARNINGS.md, section 8.1.)*
 - All GPU vendors: frame generation, VRR pacing, dedup and upscaling must work
   on AMD and Intel too. NVIDIA-only features turn on only when detected:
   - DLSS 5: NVIDIA RTX 30, 40 and 50 series. NVIDIA's nvngx_dlssnr.dll 310.9.16
@@ -27,6 +29,10 @@ credit. MPV-SW-Capture stays the owner's daily app until this one replaces it.
     by GPU). RTX 20: `[dlss5] enabled = on` tries it. RTX Encore
     (SilyNoMeta/rtx-encore, closed source) was looked at and not needed.
   - RTX Video Super Resolution.
+  - NVIDIA Video Frame Generation in place of our own generator: RTX 40 and
+    50 series, an opt-in download (done 2026-11-17, `Method=vfg`; not yet
+    tried with a card or full screen with VRR). Our own stays the default and
+    the fall-back everywhere.
 - Capture cards: best effort, no guarantees. Goal: any card MPV-SW-Capture
   works with. Our Media Foundation capture (dedup, frame gen) first, with
   mpv's DirectShow input as a fallback; the app says which features the
@@ -44,9 +50,14 @@ Keep / build:
   restarts the pipeline). Auto-detecting HDR from the picture is a later experiment.
   *(done 2026-11-14: `video.mode = auto`, the default; src/capture/signal_kind.h.
   Tested with one console and the Live Gamer Ultra 2.1 in both directions,
-  on one dark scene; other consoles, cards and bright scenes are not.)*
+  on one dark scene; other consoles, cards and bright scenes are not.
+  2026-11-17: a 10-bit capture is switched while playing, over mpv's IPC
+  (the colour tags and target-colorspace-hint), without starting mpv again;
+  with Picture = HDR on NVIDIA RTX an SDR signal goes through RTX Video HDR
+  (`video.rtx_hdr`). Tested with a test pattern, not yet with a console.)*
 - Dedup, frame generation x2 with VRR hold pacing, low-latency "send repeats"
-  switch (frame gen off).
+  switch (frame gen off). *(x3 and x4 added 2026-11-17 as a choice: provided
+  as is, not recommended, never the default)*
 - DLSS 5 with neural rendering on/off.
 - Upscaling: mpv's built-in scaling + FSR1 (any GPU); RTX VSR on NVIDIA.
   DLSS / FSR upscaling later, enabled by compatibility. *(done: [video]
@@ -95,6 +106,7 @@ before, the newest of each):
 | DLSS5-Feeder (MIT) | jlrouzies-fr/DLSS5-Feeder releases |
 | RenoDX-DLSS5, nvngx_dlssnr.dll | RankFTW/rhi-repo releases (RHI's mirror) |
 | nvngx_dlss.dll | NVIDIA/DLSS releases |
+| NVIDIA Video Frame Generation (only on request, after NVIDIA's licences are accepted) | pypi.nvidia.com/nvidia-vfx |
 
 Shipped with notices: our code, MSC scripts we keep (MIT, TyRaS-SW),
 msc_audio (MIT, z-er), FSR1 / NIS / Adaptive Sharpen / KrigBilateral (LGPL,
@@ -143,7 +155,8 @@ Each step tested against the real capture card before the next:
    (src/overlay, Dear ImGui) is drawn by the frame generation add-on on every
    presented frame, after DLSS 5 and frame generation, and built again for each;
    it saves to glasir.ini, switches SDR/HDR by restarting the picture (mpv exit
-   code 42). The launcher is Glasir.exe's own window (Dear ImGui on D3D11),
+   code 42; since 2026-11-17 only where the card has to be opened in another
+   mode, else while playing). The launcher is Glasir.exe's own window (Dear ImGui on D3D11),
    [launcher] show / Shift / --play. The key-press OSD texts (volume,
    boost, F8...) go through mpv's OSD, so through DLSS 5 and frame generation;
    they could move into the overlay)* *(done: toasts drawn by the overlay;

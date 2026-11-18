@@ -31,7 +31,10 @@ captures (real game frames) are never committed.
 
 ## 1. Goal and constraints
 
-- x2 only: 30 → 60 and 60 → 120 fps (the owner's call; x3/x4 never built).
+- x2: 30 → 60 and 60 → 120 fps (the owner's call). x3 and x4 were added on
+  11-17 at the owner's wish, as they are: not tuned, not judged on captures,
+  not recommended, there for players who want the choice (the add-on's
+  README.md, "3x and 4x").
 - Two frames, nothing else: a capture card gives no motion vectors, no depth,
   no HUD mask. The add-on finds its own motion. (It uses no ReShade motion
   vectors either, which was once suspected of causing a ghost.)
@@ -186,6 +189,10 @@ Dead ends in this phase:
     PSNR against the true middle frame.
   - Real captures: scored skip-one (frames 1 + 3 → 2), or `--adjacent` to
     write what the add-on would draw.
+  - `--adapter NAME` runs it on another GPU (part of its name, "4070").
+- **`gpu_bench.exe`** times the generator on two GPUs, a frame's way from
+  one to the other and back, and a second device on the same GPU
+  (section 8.1).
 - **Metrics:**
   - `blockiness.py`: the cell grid; 1.0 = none.
   - `head_score.py`: PSNR in 22 head regions.
@@ -259,13 +266,28 @@ implementations in private copies, scored with the same tools.
 - **NVIDIA Maxine Video Frame Generation (VFG):**
   - RTX 40/50 only, 2–8x, Low/Medium/High;
   - CUDA, so D3D11 ↔ CUDA sharing would be needed;
-  - the runtime (~435 MB) is anonymous from NVIDIA's Python index, but the C
-    headers need an NGC account;
-  - cost on an RTX 5070 (with Python overhead): Medium ~2.9 ms at 1080p and
-    ~3.9 ms at 4K; High ~14.6 ms at 1080p;
+  - the runtime (~435 MB) is anonymous from NVIDIA's Python index; the C
+    headers are MIT (NVIDIA-Maxine/Maxine-VFX-SDK on GitHub), without the
+    names added for this filter, which NVIDIA's guide lists;
   - users report edge "jelly" on Low/Medium in camera turns.
-  - Not built. The suggested first step, if ever: score it offline with
-    `fg_eval` on the same captures.
+  - Built in as an option on 11-17 (`Method=vfg`, `fg_vfg.h`; the add-on's
+    README.md has how): the owner asked for it after trying it elsewhere.
+    Our own generator stays the default and the fall-back. `eval\vfg_eval.py`
+    runs the filter offline on `fg_eval`'s clips and captures and scores it
+    the same way; `fg_eval --methods vfg` does it through `fg_vfg.h`.
+  - What was learned building it:
+    - CUDA shares a Direct3D 11 buffer but not a 10-bit texture, so the
+      frames go through buffers of packed pixels (two small shaders);
+    - mapping the buffers does not wait for Direct3D's work, the filter's
+      call does, behind whatever the GPU still has queued (the DLSS 5 pass);
+    - the filter's automatic cut detection also fires on fast motion, and
+      without it the filter draws across real cuts;
+    - RenoDX-DLSS5 sees the filter's NGX runtime load and logs that it could
+      not hook it; DLSS 5 stays engaged and both run.
+  - **No results here.** NVIDIA's licence (Software License Agreement, 8.9)
+    forbids giving benchmark, comparison or performance results of its
+    software to others without NVIDIA's written permission: VFG's scores and
+    timings stay out of this repository, its issues and bug reports.
 
 ### 4.2 Literature on motion-compensated interpolation
 
@@ -1012,6 +1034,58 @@ can be avoided.
 - GPU timings vary ~1 ms between sessions (clocks, background apps such as
   NVIDIA Broadcast or Wallpaper Engine). Compare A/B within one session.
 
+### 8.1 Frame generation on a second GPU: measured, not built (11-17)
+
+The owner asked whether the generator could run on a second GPU (this PC:
+RTX 5070 Ti with the monitor, RTX 4070 SUPER beside it). Measured first,
+with `fg_eval --adapter NAME` and `eval\gpu_bench.cpp` (2560x1440, 10-bit
+RGB, 14.7 MB a frame; wall-clock medians):
+
+| | ms |
+|---|---|
+| one frame in between on the 5070 Ti | 4.0 |
+| the same on the 4070 SUPER (same scores, 31.06 dB on the 32 captures) | 5.8 |
+| a frame from the 5070 Ti to the 4070 SUPER through system memory | 3.4 |
+| and back | 3.6 |
+| the whole round: frame over, generated there, back | 12.8 |
+| a second device on the 5070 Ti, the first one idle | 4.1 |
+| ... the first one's commands waiting on a fence (the hold) | 4.1 |
+| ... the first one busy without a break (standing in for DLSS 5) | 7.7 |
+
+(The copies' slow half is the 4070 SUPER's side, 2.3 ms each way against
+0.6 ms on the 5070 Ti's: its slot, most likely. Two staging textures mapped
+at once and one memcpy of 0.5 ms; a cross-adapter heap would save the memcpy
+only.)
+
+**Why it was not built.** The frame in between would come 9 ms later than
+it does now (12.8 ms against 4.0), and the 5070 Ti is not short of time:
+at 30 fps DLSS 5 takes 8 to 14 ms of the 33 (the owner's dlss5-feed.log),
+and three frames in between would add 12. What 3x and 4x run into with
+DLSS 5 on ("A rate the GPU cannot hold" in src/framegen/README.md) is the
+order of things, not the GPU's time: mpv's device has one stream of commands, and in it the next
+real frame's DLSS 5 pass stands behind the presents of this one's frames,
+each held for its time by a wait in that same stream. So the real frame is
+let go early for the next pass (145 of 147 in the owner's log at 2x: shown
+10 ms after the frame in between, not 16.7), and at 3x and 4x the later
+frames do not fit at all. Whichever GPU makes the frames, they still have
+to be presented through that stream: even steps need DLSS 5 plus the first
+frame in between done within one step (11 ms at 3x, 8.3 at 4x), and a
+second GPU makes that first frame later, not sooner.
+
+**What the numbers point to instead.** The last three rows: a second
+device on the same GPU is not held up by the first one's waits, and gets
+its frame in between done in under 8 ms even while the first never rests.
+A presenter of Glasir's own - its own device, window and swap chain, fed
+the real frames after DLSS 5, making and showing the frames in between on
+its own clock - would take the presents out of mpv's stream. That would
+give even steps at 2x with DLSS 5 on and room for 3x and 4x, on one GPU.
+A second GPU could then run it too, but only with the monitor plugged into
+that GPU (one copy a frame, 3.4 ms; otherwise Windows copies every
+presented frame back across). It is PLAN.md's "native renderer": mpv's
+window, input, full screen, the black bars, HDR metadata, VRR and
+independent flip, the menu and the captures would all have to work through
+it. Not started.
+
 ## 9. Testing: tools and gotchas
 
 - **Without the card:**
@@ -1060,7 +1134,11 @@ can be avoided.
     the same build on the same frames (4.7).
 - **Ideas not pursued:**
   - finer motion at object edges (4x4 on boundary cells only);
-  - x3/x4 (needs the pacing generalised);
-  - frame generation on the second GPU;
-  - an offline VFG comparison;
+  - x3/x4 that keep the pair's motion search for its other frames (built
+    11-17 with a whole pass for each frame: the HUD hold rewrites the searched
+    fields for the frame it was run for), and judged on captures: there are
+    none with true frames at thirds or quarters;
+  - frame generation on the second GPU (measured 11-17, section 8.1: it
+    would make the frame in between later; what holds 3x and 4x back is
+    the order of the presents, which a presenter of our own would fix);
   - a z-order rule that keeps NPCs solid without hair artefacts.

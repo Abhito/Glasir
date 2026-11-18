@@ -552,6 +552,93 @@ bool install_dlss5(const std::wstring &engine, Fetcher &f, std::wstring &error) 
     return true;
 }
 
+// ---------------------------------------------------------------- NVIDIA Video Frame Generation
+
+// What the frame generation add-on loads from engine\nvidia-vfg (fg_vfg.h).
+constexpr const wchar_t *kVfgFiles[] = {L"cudart64_12.dll", L"NVCVImage.dll", L"nvngxruntime.dll",
+                                        L"NVVideoEffects.dll", L"nvVFXVideoFrameGeneration.dll"};
+
+// "0.2.0.0" as numbers, to tell which of two is newer.
+std::vector<int> version_numbers(const std::string &text) {
+    std::vector<int> out(1, 0);
+    for (char c : text) {
+        if (c == '.') out.push_back(0);
+        else if (c >= '0' && c <= '9' && out.back() < 100000000) out.back() = out.back() * 10 + (c - '0');
+    }
+    return out;
+}
+
+// NVIDIA publishes the runtime of its Video Effects SDK as a Python package
+// (a zip) on its own package index; the filter's DLLs and NVIDIA's licences
+// are in it. Only asked for by the user, who accepts those licences first
+// (setup_ui.h): Glasir's own setup never adds it.
+bool install_vfg(const std::wstring &engine, Fetcher &f, std::wstring &error) {
+    const std::wstring label = L"NVIDIA Video Frame Generation";
+    auto fail = [&](const std::wstring &what) {
+        error = label + L": " + what;
+        return false;
+    };
+    const std::wstring index = L"https://pypi.nvidia.com/nvidia-vfx/";
+    const Lookup newest = [&](Source &s, std::wstring &e) {
+        std::string page;
+        if (!f.dl().get(index, {}, page, e)) return false;
+        // href="nvidia_vfx-0.2.0.0-cp312-abi3-win_amd64.whl#sha256=..."
+        const std::regex link(R"re((nvidia_vfx-([0-9.]+)-cp3[0-9]+-abi3-win_amd64\.whl)#sha256=([0-9a-f]{64}))re");
+        std::vector<int> best;
+        for (std::sregex_iterator it(page.begin(), page.end(), link), end; it != end; ++it) {
+            const std::vector<int> v = version_numbers((*it)[2].str());
+            if (!best.empty() && !std::lexicographical_compare(best.begin(), best.end(), v.begin(), v.end())) continue;
+            best = v;
+            s = {widen((*it)[2].str()), index + widen((*it)[1].str()), (*it)[3].str(), 0};
+        }
+        if (best.empty()) return e = L"no Windows package on pypi.nvidia.com/nvidia-vfx", false;
+        return true;
+    };
+    Got got;
+    if (!f.fetch("vfg", label, newest, got, error)) return false;
+
+    f.dl().step(L"Unpacking " + label);
+    const std::wstring unpacked = f.work() + L"\\vfg";
+    std::vector<std::wstring> members;
+    for (const wchar_t *file : kVfgFiles) members.push_back(std::wstring(L"nvvfx/libs/") + file);
+    if (!unpack(got.file, unpacked, members, error)) return fail(error);
+    const std::wstring stage = f.work() + L"\\nvidia-vfg";
+    std::error_code ec;
+    fs::create_directories(stage + L"\\licenses", ec);
+    for (const wchar_t *file : kVfgFiles) {
+        const std::wstring from = unpacked + L"\\nvvfx\\libs\\" + file;
+        if (!file_exists(from)) return fail(std::wstring(L"no ") + file + L" in the download");
+        std::wstring signer;
+        if (!signed_by(from, L"NVIDIA Corporation", signer))
+            return fail(std::wstring(file) + L" is not signed by NVIDIA (" + signer + L")");
+        fs::copy_file(from, stage + L"\\" + file, fs::copy_options::overwrite_existing, ec);
+        if (ec) return fail(std::wstring(L"could not copy ") + file + L": " + widen(ec.message()));
+    }
+    // NVIDIA's licences as the package has them, kept beside the DLLs.
+    std::wstring no_licences;
+    if (unpack(got.file, unpacked, {L"*.dist-info/licenses"}, no_licences)) {
+        for (fs::recursive_directory_iterator it(unpacked, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec) || it->path().wstring().find(L".dist-info") == std::wstring::npos) continue;
+            std::error_code copy_ec;
+            fs::copy_file(it->path(), stage + L"\\licenses\\" + it->path().filename().wstring(),
+                          fs::copy_options::overwrite_existing, copy_ec);
+        }
+    } else {
+        log(L"{}: the package's licence files were not unpacked ({})", label, no_licences);
+    }
+
+    f.dl().step(L"Installing " + label);
+    EngineSwap swap;
+    swap.folder(stage, engine + L"\\nvidia-vfg");
+    if (!swap.run(error)) return fail(error);
+    Record record(engine);
+    record.clear(L"vfg");
+    record.set(L"vfg", L"", got);
+    record.set(L"vfg", L"installed", today());
+    log(L"installed {} {}", label, got.version);
+    return true;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- public
@@ -561,6 +648,7 @@ const wchar_t *component_name(Component c) {
     case Component::Mpv: return L"mpv";
     case Component::ReShade: return L"ReShade";
     case Component::Dlss5: return L"DLSS 5";
+    case Component::Vfg: return L"NVIDIA Video Frame Generation";
     }
     return L"?";
 }
@@ -574,6 +662,10 @@ bool component_installed(const std::wstring &engine_dir, Component c) {
                                     L"\\nvngx_dlss.dll", L"\\reshade-shaders\\Shaders\\DLSS5Feeder\\DLSS5_Feed.fx"})
             if (!file_exists(engine_dir + file)) return false;
         return true;
+    case Component::Vfg:
+        for (const wchar_t *file : kVfgFiles)
+            if (!file_exists(engine_dir + L"\\nvidia-vfg\\" + file)) return false;
+        return true;
     }
     return false;
 }
@@ -581,7 +673,7 @@ bool component_installed(const std::wstring &engine_dir, Component c) {
 std::vector<std::wstring> installed_versions(const std::wstring &engine_dir) {
     const std::wstring ini = engine_dir + L"\\components.ini";
     std::vector<std::wstring> out;
-    for (const wchar_t *section : {L"mpv", L"reshade", L"dlss5"}) {
+    for (const wchar_t *section : {L"mpv", L"reshade", L"dlss5", L"vfg"}) {
         std::vector<wchar_t> keys(16384);
         const DWORD n = GetPrivateProfileSectionW(section, keys.data(), DWORD(keys.size()), ini.c_str());
         std::wstring line;
@@ -658,6 +750,7 @@ bool component_as_tested(const std::wstring &engine_dir, Component c) {
         for (const char *part : kDlss5Parts)
             if (!part_as_tested(engine_dir, part, L"dlss5", widen(part))) return false;
         return true;
+    case Component::Vfg: return part_as_tested(engine_dir, "vfg", L"vfg", L"");
     }
     return true;
 }
@@ -703,6 +796,7 @@ bool install_components(const std::wstring &engine_dir, const std::vector<Compon
         case Component::Mpv: ok = install_mpv(engine_dir, fetcher, error); break;
         case Component::ReShade: ok = install_reshade(engine_dir, fetcher, error); break;
         case Component::Dlss5: ok = install_dlss5(engine_dir, fetcher, error); break;
+        case Component::Vfg: ok = install_vfg(engine_dir, fetcher, error); break;
         }
         if (!ok) {
             log(L"setup: {} failed: {}", component_name(c), error);

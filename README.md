@@ -23,10 +23,12 @@ for Windows 11 · [How to install](#-installing)
 ## ✨ Features
 
 - **30 fps games, smooth at 60.** Motion-compensated frame generation
-  (30 → 60, 60 → 120 fps) on any GPU: NVIDIA, AMD or Intel.
+  (30 → 60, 60 → 120 fps) on any GPU: NVIDIA, AMD or Intel. On an RTX 40 or
+  50 series GPU, NVIDIA Video Frame Generation can make the frames instead.
 - **HDR that looks right from the start.** Glasir tells from the picture
-  whether the console sends SDR or HDR and follows it, with nothing to
-  calibrate.
+  whether the console sends SDR or HDR and follows it while you play, with
+  nothing to calibrate. On an NVIDIA RTX GPU the screen can stay in HDR, with
+  SDR games turned into HDR by RTX Video HDR.
 - **DLSS 5 neural rendering** on NVIDIA RTX 30, 40 and 50 series GPUs.
 - **Sharper than the card sends it.** A 1080p capture scaled up to your
   screen by a neural network, not just stretched (see [Scaling](#scaling)).
@@ -44,6 +46,14 @@ for Windows 11 · [How to install](#-installing)
 > Frame generation makes motion smoother. It does not make the game react
 > faster: the console still runs at its own rate, and the generated frames
 > add a few milliseconds.
+>
+> It doubles the frame rate (2x). **3x and 4x** ("Rate", under Frame
+> generation) are provided as is and are not recommended: every generated
+> frame takes GPU time and adds delay, and more of what you see is made up.
+> They are included for players who want the choice. When the display cannot
+> show that many frames, or the GPU cannot finish them in time (DLSS 5 takes
+> most of it), the highest multiple that holds steady is shown and the menu
+> says so in red.
 
 ---
 
@@ -53,7 +63,7 @@ for Windows 11 · [How to install](#-installing)
 |---|---|
 | **System** | Windows 11, 64-bit |
 | **Capture card** | Any card Windows' own video capture can open gets every feature. Other cards run in a basic mode (no frame generation, no dropping of repeated frames), and Glasir tells you when that happens. |
-| **GPU** | Any DirectX 11 GPU for frame generation and upscaling. NVIDIA RTX or Intel for video super resolution. NVIDIA RTX 30, 40 or 50 series for DLSS 5 (it takes more GPU time on the older ones). |
+| **GPU** | Any DirectX 11 GPU for frame generation and upscaling. NVIDIA RTX or Intel for video super resolution. NVIDIA RTX 30, 40 or 50 series for DLSS 5 (it takes more GPU time on the older ones). NVIDIA RTX 40 or 50 series for NVIDIA Video Frame Generation, an optional download. |
 | **Screen** | A VRR screen (G-SYNC or FreeSync) is best for frame pacing, but not needed. |
 
 We can't promise that every capture card works.
@@ -97,6 +107,11 @@ To remove Glasir, delete its folder.
   [RHI's mirror](https://github.com/RankFTW/rhi-repo),
   [NVIDIA DLSS](https://github.com/NVIDIA/DLSS)
 
+Only if you ask for it (Frame generation, "Made by: NVIDIA", then "Download
+it"), and after you accept NVIDIA's licences: NVIDIA Video Frame Generation,
+from [NVIDIA's package index](https://pypi.nvidia.com/nvidia-vfx/) (about
+440 MB).
+
 Each Glasir downloads the versions it was tested with, so a new release of
 one of them does not reach you before a Glasir tested with it does. Every
 download is checked against the SHA-256 recorded for that version, and
@@ -131,10 +146,12 @@ command line.
 ## 🎮 Using it
 
 `Glasir.exe` opens its window first: pick the capture card and its mode,
-DLSS 5, frame generation, the sound and the window mode, then press
-**Play**.
+DLSS 5 and frame generation, then press **Play**. What is set once (scaling,
+the sound, the window mode, downloading the programs again, a bug report) is
+under **More options**.
 
-- Untick "Show this window when Glasir starts" to play at once. Hold
+- Switch off "Open this window when Glasir starts" (under More options) to
+  play at once. Hold
   **Shift** while starting Glasir to see the window again, or start it with
   `Glasir.exe --play` to skip it.
 - Everything is kept in `glasir.ini`, and every key is explained in the
@@ -150,9 +167,10 @@ DLSS 5, frame generation, the sound and the window mode, then press
 - **Automatic** (the default): Glasir captures in the card's 10-bit mode and
   tells from the picture whether the console sends SDR or HDR. When that
   changes (HDR switched on in the console, a game that switches it), the
-  picture starts again in the other mode: about a second after an SDR
-  picture shows up, about five after an HDR one. It starts the way it found
-  the signal last time. A card without a 10-bit mode plays SDR.
+  picture changes with it while you play: about a second after an SDR
+  picture shows up, about five after an HDR one. Nothing starts again; a
+  line at the top says what happened. It starts the way it found the signal
+  last time. A card without a 10-bit mode plays SDR.
 - **SDR** or **HDR**: you say it. SDR also offers the card's 8-bit modes,
   which are often larger or faster (4K at 60 fps where 10-bit stops at
   1440p). Use these if Automatic gets a game wrong: a console set to a peak
@@ -160,6 +178,19 @@ DLSS 5, frame generation, the sound and the window mode, then press
   dim SDR scene without any white can read as HDR.
 
 HDR needs HDR on in Windows (Settings, Display) too.
+
+**RTX HDR for SDR** (NVIDIA RTX GPUs; under "More options" and in the menu
+once Picture is HDR; on by default): with Picture set to HDR the screen
+stays in HDR, and when the console sends SDR, NVIDIA RTX Video HDR turns it
+into HDR. Glasir tells SDR from HDR by the picture as Automatic does.
+Switch it off to have everything shown as HDR, whatever the picture looks
+like (for a game Glasir takes for SDR by mistake). Automatic does not use
+it: there SDR is shown as SDR.
+
+The menu's Picture choices take effect at once when the card is captured in
+10-bit (Automatic or HDR at the start). After a start in SDR with an 8-bit
+mode, a change starts the picture again, as the card has to be opened in
+another mode.
 
 ### Keys
 
@@ -261,7 +292,7 @@ The frames themselves are saved too, in `Captures\` (about 100 MB each
 time, never sent anywhere). Keep the folder the report names until the issue
 is closed, in case they are asked for; delete the others whenever you like.
 
-**Save a bug report** in Glasir's window, or `Glasir.exe --bug-report`,
+**Save a bug report** in Glasir's window (under More options), or `Glasir.exe --bug-report`,
 saves one without frames. Paths in it have your user folder replaced by
 `%USERPROFILE%`, so your Windows user name is not in it.
 
@@ -298,6 +329,7 @@ Testing without a capture card (needs ffmpeg and Python):
 ```
 python tools\smoke_raw.py                    # NV12, a 30 fps game captured at 60
 python tools\smoke_raw.py --format p010 --hdr
+python tools\picture_check.py                # SDR, HDR and back while playing (--mode hdr: RTX HDR for SDR)
 python tools\probe.py --set video.mode=hdr   # with a real card, in a small window
 ```
 

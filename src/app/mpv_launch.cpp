@@ -17,20 +17,37 @@ std::wstring fps_text(double fps) {
     return s;
 }
 
+}  // namespace
+
 // The colour tags raw frames need: they carry none of their own. SDR from
 // consoles is BT.709; 4:2:0 from cards (NV12, and P010 with an SDR signal in
-// it) is sited top-left, 4:2:2 left.
-std::wstring colour_filter(const MpvPlan &plan, const Settings &s) {
-    if (s.hdr)
-        return std::format(L"format=colormatrix=bt.2020-ncl:colorlevels=limited:primaries=bt.2020:gamma=pq:"
-                           L"max-luma={0}:max_cll={0}",
+// it) is sited top-left, 4:2:2 left. The label is what lets the filter be
+// replaced while playing ("vf add @label:..." puts the new one in its place).
+std::wstring colour_filter(const MpvPlan &plan, const Settings &s, bool hdr) {
+    if (hdr)
+        return std::format(L"@glasir-colour:format=colormatrix=bt.2020-ncl:colorlevels=limited:primaries=bt.2020:"
+                           L"gamma=pq:max-luma={0}:max_cll={0}",
                            s.hdr_peak_nits);
     const wchar_t *siting = is_planar(plan.layout.format) ? L"uhd" : L"mpeg2/4/h264";
-    return std::format(L"format=colormatrix=bt.709:colorlevels={}:primaries=bt.709:chroma-location={}",
+    return std::format(L"@glasir-colour:format=colormatrix=bt.709:colorlevels={}:primaries=bt.709:chroma-location={}",
                        s.sdr_full_range ? L"full" : L"limited", siting);
 }
 
-}  // namespace
+// Tried on mpv 0.42 (2026-11-17): the swap chain follows target-colorspace-hint
+// at once (HDR10 with yes on an HDR desktop, sRGB with no - also after a start
+// with --d3d11-output-csp=pq), and ReShade keeps running. Setting
+// d3d11-output-csp while playing makes mpv build its output again, ReShade
+// and all (about 9 s): never do that here. (Not tried: a desktop with HDR
+// off, where a start in HDR forces PQ with that option and a switch while
+// playing cannot.) Nor is d3d11-output-format set: a start in SDR leaves it
+// to mpv, which takes 10 bits on an HDR desktop (seen in every test). The
+// order: the tags, then the filters that depend on them, then the output.
+std::string picture_commands(const MpvPlan &plan, const Settings &s, const Picture &p) {
+    return ipc_command({L"vf", L"add", colour_filter(plan, s, p.hdr)}) +
+           ipc_command({L"script-message", L"glasir-signal", p.hdr ? L"hdr" : p.rtx_hdr ? L"rtx" : L"sdr"}) +
+           ipc_command({L"set", L"target-colorspace-hint", p.output_hdr() ? L"yes" : L"no"}) +
+           ipc_command({L"set", L"user-data/glasir/signal", p.hdr ? L"hdr" : L"sdr"});
+}
 
 std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) {
     std::vector<std::wstring> a = {
@@ -91,6 +108,7 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
     scaling(L"mode", scaling_name(s.scaling));
     scaling(L"vsr", plan.vsr);
     scaling(L"hdr", s.hdr ? L"yes" : L"no");
+    scaling(L"rtx_hdr", plan.rtx_hdr && !s.hdr ? L"yes" : L"no");
     scaling(L"hdr_peak", std::to_wstring(s.hdr_peak_nits));
 
     if (plan.raw) {
@@ -100,7 +118,7 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
         a.push_back(std::format(L"--demuxer-rawvideo-h={}", plan.layout.height));
         a.push_back(std::format(L"--demuxer-rawvideo-mp-format={}", mpv_format_name(plan.layout.format)));
         a.push_back(L"--demuxer-rawvideo-fps=" + fps_text(plan.fps));
-        a.push_back(L"--vf=" + colour_filter(plan, s));
+        a.push_back(L"--vf=" + colour_filter(plan, s, s.hdr));
     } else {
         a.push_back(L"--demuxer-lavf-o-append=rtbufsize=64M");
         // The mode from the card's list, or else what glasir.ini asks for.
@@ -120,11 +138,15 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
                 a.push_back(L"--demuxer-lavf-o-append=vcodec=mjpeg");
         }
     }
-    if (s.hdr) {
+    // HDR is shown by its tags, not by what mpv measures in each frame. Said
+    // for every start: a picture that starts as SDR may be switched to HDR
+    // while playing (picture_commands), and must then look as one started in HDR.
+    a.push_back(L"--hdr-compute-peak=no");
+    // An SDR signal through RTX Video HDR comes out of its filter as HDR10.
+    if (s.hdr || plan.rtx_hdr) {
         a.push_back(L"--target-colorspace-hint=yes");
         a.push_back(L"--d3d11-output-format=rgb10_a2");
         a.push_back(L"--d3d11-output-csp=pq");
-        a.push_back(L"--hdr-compute-peak=no");
     } else {
         a.push_back(L"--target-colorspace-hint=no");
     }

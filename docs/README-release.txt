@@ -10,11 +10,16 @@ GETTING STARTED
 3. Start Glasir.exe, pick your card and what you want in its window, and
    press Play. The first time, it asks to download the programs it runs on
    (mpv and ReShade, plus DLSS 5 on an NVIDIA RTX 30, 40 or 50 series GPU).
+   On an RTX 40 or 50 its window also offers NVIDIA Video Frame Generation
+   ("Made by: NVIDIA" under Frame generation), a separate download under
+   NVIDIA's licences.
    They come straight from their authors' sites, in the versions this
    Glasir was tested with; THIRD-PARTY-NOTICES.md lists them and their
    licences.
 4. While playing, Tab opens the menu. SDR or HDR is found by itself
-   ("Picture: Automatic"); the menu and Glasir's window can also say which.
+   ("Picture: Automatic") and followed while you play; the menu and
+   Glasir's window can also say which. With an NVIDIA RTX GPU and
+   "Picture: HDR", SDR games are turned into HDR (RTX Video HDR).
 
 Settings are in glasir.ini (written on the first start, every setting
 explained). Volume, boost and audio delay you change while playing are kept
@@ -33,6 +38,8 @@ KEYS
   Ctrl+r                   restart the sound
   F6                       DLSS 5 on/off
   F8                       frame generation on/off
+                           (its "Rate" 3x and 4x are provided as is and are
+                           not recommended: more delay and GPU load)
   F9                       save a bug report, with the frames on screen
   s                        screenshot (in Screenshots\)
   q, Esc                   quit (Esc closes the menu first if it is open)

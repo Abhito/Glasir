@@ -39,10 +39,30 @@ struct MpvPlan {
 
     // The GPU's video super resolution for scaling = vsr: vsr_kind().
     std::wstring vsr = L"none";
+    // An SDR signal (settings.hdr is false) shown in HDR by NVIDIA RTX Video
+    // HDR: mpv's output is HDR, glasir_scaling.lua runs the filter.
+    bool rtx_hdr = false;
+};
+
+// How the picture is shown: what the frames are (SDR or HDR10), and whether
+// SDR ones go through NVIDIA RTX Video HDR. Changed while playing with
+// picture_commands().
+struct Picture {
+    bool hdr = false;
+    bool rtx_hdr = false;  // only with !hdr
+    bool output_hdr() const { return hdr || rtx_hdr; }
+    bool operator==(const Picture &) const = default;
 };
 
 // mpv's arguments (without the program).
 std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &settings);
+// The filter (with its label) that tags raw frames as SDR or HDR10: they
+// carry no tags of their own.
+std::wstring colour_filter(const MpvPlan &plan, const Settings &settings, bool hdr);
+// The IPC commands that show the picture as p from now on, without starting
+// mpv again: the tags, glasir_scaling.lua's filters, mpv's output, and what
+// the menu reads (user-data/glasir/signal).
+std::string picture_commands(const MpvPlan &plan, const Settings &settings, const Picture &p);
 // What to load once mpv is up: "-" (stdin) or the DirectShow URL.
 std::wstring mpv_load_target(const MpvPlan &plan);
 

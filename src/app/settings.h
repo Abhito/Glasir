@@ -24,6 +24,9 @@ struct Settings {
     bool hdr_auto = true;
     bool hdr = false;
     bool auto_found_hdr = true;
+    // mode = hdr on an NVIDIA RTX GPU: an SDR signal is shown in HDR by RTX
+    // Video HDR (the signal is watched there too). Off: all of it is HDR.
+    bool rtx_hdr = true;
     bool sdr_full_range = false;
     int hdr_peak_nits = 1000;
     // How the capture is scaled up to the window (glasir_scaling.lua).
@@ -36,6 +39,12 @@ struct Settings {
     // [framegen]
     bool framegen = true;
     bool framegen_fast = false;       // quality = fast: about half the GPU time
+    // method = nvidia: NVIDIA Video Frame Generation makes the frames in
+    // between (an RTX 40 or 50, once it is downloaded); Glasir's own where it
+    // cannot run.
+    bool framegen_nvidia = false;
+    int nvidia_quality = 1;           // nvidia_quality: 0 low, 1 medium, 2 high (its model's size)
+    int framegen_multiplier = 2;      // multiplier: 2, 3 or 4 frames shown for each of the game's
     bool all_frames_when_off = true;  // frame generation off: every frame (lowest latency)
     // [dlss5]
     enum class Dlss5 { Auto, On, Off };

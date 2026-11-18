@@ -224,3 +224,10 @@ Glasir downloads the versions it was tested with;
 | RenoDX-DLSS5 | https://github.com/RankFTW/rhi-repo (RHI mirror) | MIT (source: Yukikaze20170315/RenoDX-DLSS5-Generic, clshortfuse/renodx) |
 | NVIDIA DLSS (`nvngx_dlss.dll`) | https://github.com/NVIDIA/DLSS | NVIDIA RTX SDKs licence |
 | NVIDIA DLSS neural rendering (`nvngx_dlssnr.dll`) | https://github.com/RankFTW/rhi-repo (RHI mirror) | NVIDIA |
+
+Only when you ask for it in Glasir's window, which shows NVIDIA's licences
+first and downloads nothing unless you accept them:
+
+| Component | Source | Licence |
+|---|---|---|
+| NVIDIA Video Frame Generation (the Video Effects SDK's runtime, `engine\nvidia-vfg`) | https://pypi.nvidia.com/nvidia-vfx/ | NVIDIA Software License Agreement, Product-Specific Terms for NVIDIA AI Products, NVIDIA Open Model License (copies in `engine\nvidia-vfg\licenses`) |
