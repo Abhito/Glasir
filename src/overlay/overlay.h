@@ -121,11 +121,14 @@ void set_scaled_picture(const D3D11_BOX *box);
 
 // NVIDIA Super Resolution's part of the menu's Host, set apart from frame
 // generation's: its model (0 low .. 3 ultra), and whether it runs (1), has
-// nothing to do or is not chosen (0), or could not (-1).
+// nothing to do or is not chosen (0), or could not (-1). made: the size it
+// made the picture on the frame being presented, before that went to its
+// place in the window (false: it did not scale this frame).
 struct ScalerHost {
     int (*level)() = nullptr;
     void (*set_level)(int level) = nullptr;
     int (*state)() = nullptr;
+    bool (*made)(int &width, int &height) = nullptr;
 };
 void set_scaler_host(const ScalerHost &host);
 const ScalerHost &scaler_host();

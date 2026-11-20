@@ -105,7 +105,8 @@ SOFTWARE.
 
 ### AMD FidelityFX Super Resolution 1
 
-`engine\portable_config\shaders\glasir_fsr1.glsl` (the FSR 1 scaling) is
+`engine\portable_config\shaders\glasir_fsr1.glsl` (the FSR 1 scaling) and
+`glasir_rcas.glsl` beside it (Sharpen: FSR 1's sharpening pass alone) are
 Glasir's port of AMD's `ffx_fsr1.h`, from
 https://github.com/GPUOpen-Effects/FidelityFX-FSR (v1.0.2).
 

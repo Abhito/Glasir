@@ -4,7 +4,8 @@
 Pipes ffmpeg's test pattern, smaller than mpv's window, into Glasir.exe
 --input-raw, switches the scaling modes the way the in-game menu does
 (script-message glasir-scaling), and checks over Glasir's IPC pipe what
-glasir_scaling.lua put in place: the shaders, the VSR filter, the mode. Prints
+glasir_scaling.lua put in place: the shaders, the VSR filter, the mode, and
+what it says of them for the menu's top line (user-data/glasir/scaled). Prints
 the GPU time mpv's renderer spends per fresh frame (vo-passes) for each mode.
 Opens a window for a few seconds per mode.
 
@@ -29,6 +30,9 @@ sized for that height (sized_<w>x<h>_<name>), the VSR filter's output that
 tall, and mpv scales from there to the window. It is also switched while
 playing (script-message glasir-target, as the menu does): to the screen and
 back.
+At the end, every run: that mpv scales down with Lanczos (mpv.conf), and
+"Sharpen" as the menu switches it (script-message glasir-sharpen): the shader
+glasir_rcas.glsl in mpv's list with its strength, and gone again when off.
 """
 import argparse
 import json
@@ -110,7 +114,7 @@ def main():
     a = p.parse_args()
     width, height = (int(v) for v in a.size.split('x'))
     # What glasir_scaling.lua makes of the target: an even height, the width to match.
-    out_h = int(height * min(a.target / height, 4) / 2) * 2 if a.target else 0
+    out_h = int(height * min(a.target / height, 4, 16384 / width) / 2) * 2 if a.target else 0
     out_w = int(width * (out_h / height) / 2 + 0.5) * 2 if a.target else 0
     scaled = bool(a.target) and out_h > height * 1.001  # else the capture is already that tall
 
@@ -127,7 +131,8 @@ def main():
         [os.path.join(a.app, 'Glasir.exe'), '--no-dialogs', '--input-raw', '-', '--raw-format', a.format,
          '--set', f'capture.width={width}', '--set', f'capture.height={height}', '--set', 'capture.fps=60',
          '--set', 'window.mode=windowed', '--set', f'video.mode={"hdr" if a.hdr else "sdr"}', '--set', 'video.rtx_hdr=0',
-         '--set', 'video.scaling=mpv', '--set', f'video.scale_to={a.target or "screen"}', '--set', 'debug.mpv_log=1'],
+         '--set', 'video.scaling=mpv', '--set', f'video.scale_to={a.target or "screen"}', '--set', 'video.sharpen=off',
+         '--set', 'debug.mpv_log=1'],
         stdin=ffmpeg.stdout)
     ffmpeg.stdout.close()
 
@@ -175,6 +180,19 @@ def main():
                 good = shaders == want and not vsr_on
                 what = f'{len(shaders)} shaders' if len(shaders) > 2 else ', '.join(shaders) or 'no shaders'
             good = good and shown == mode
+            # What the script says is in place, for the menu's top line: the size and what makes it.
+            made = mpv.get('user-data/glasir/scaled') or ''
+            by = '' if not larger or mode == 'mpv' else mode if mode != 'vsr' or vsr_on else 'fsr'
+            # Its size: the target's; by the window, the picture's place for the shaders (whatever the
+            # scale) and four times the capture at most for the video processor.
+            place_w = (now.get('w') or 0) - (now.get('ml') or 0) - (now.get('mr') or 0)
+            place_h = (now.get('h') or 0) - (now.get('mt') or 0) - (now.get('mb') or 0)
+            size = f'{out_w}x{out_h} ' if fixed else f'{place_w}x{place_h} ' if by != 'vsr' else ''
+            if not (made.endswith(' ' + by) and made.startswith(size) if by else made == ''):
+                good = False
+                what += f"; scaled says '{made}'"
+            elif made:
+                what += f'; makes {made.split()[0]}'
             print(f"  {mode:8s} {'ok  ' if good else 'FAIL'} {what}; {total:.2f} ms GPU per frame")
             for b in big:
                 print(f'             {b}')
@@ -192,9 +210,11 @@ def main():
             shaders = [os.path.basename(s) for s in (mpv.get('glsl-shaders') or [])]
             own = mpv.get('video-unscaled') in (True, 'yes') and mpv.get('user-data/glasir/sr') == 'on'
             stand_in = names('fsr') if scaled or not a.target else []  # FSR 1, sized for the target
+            made = mpv.get('user-data/glasir/scaled') or ''  # the add-on's own is not the script's to say
             good = mpv.get('user-data/glasir/scaling') == 'nvidia' and (
-                (own and shaders == []) or
-                (not own and mpv.get('video-unscaled') in (False, 'no') and shaders == stand_in))
+                (own and shaders == [] and made == '') or
+                (not own and mpv.get('video-unscaled') in (False, 'no') and shaders == stand_in and
+                 ((made == f'{out_w}x{out_h} fsr' if a.target else made.endswith(' fsr')) if stand_in else made == '')))
             print(f"  nvidia   {'ok  ' if good else 'FAIL'} "
                   f"{'the add-on scales: mpv draws the picture as it comes' if own else 'FSR 1 instead (it cannot run here)'}")
             ok = good and ok
@@ -216,6 +236,25 @@ def main():
             ok = (mpv.get('user-data/glasir/target') == str(a.target)) and check('fsr') and ok
             print(f"  mpv's own scaler from there: dscale={mpv.get('dscale')}, scale={mpv.get('scale')}, "
                   f"correct-downscaling={mpv.get('correct-downscaling')}, linear-downscaling={mpv.get('linear-downscaling')}")
+        # Scaling down is Lanczos (mpv.conf), not mpv's own default.
+        if mpv.get('dscale') != 'lanczos':
+            print(f"  FAIL mpv scales down with {mpv.get('dscale')}, not lanczos")
+            ok = False
+        # Sharpen, as the menu switches it: the shader on mpv's output with its strength, and gone again.
+        # The scaling's own shaders stay as they are, whatever Sharpen does.
+        scaling_shaders = [s for s in (mpv.get('glsl-shaders') or []) if 'glasir_rcas' not in s]
+        for level, stops in ((1, '2.00'), (2, '1.00'), (3, '0.50'), (0, None)):
+            mpv('script-message', 'glasir-sharpen', str(level))
+            time.sleep(1)
+            listed = mpv.get('glsl-shaders') or []
+            there = 'glasir_rcas.glsl' in [os.path.basename(s) for s in listed]
+            strength = (mpv.get('glsl-shader-opts') or {}).get('glasir_sharpen')
+            good = (mpv.get('user-data/glasir/sharpen') == str(level) and there == (level > 0) and
+                    (level == 0 or strength == stops) and
+                    [s for s in listed if 'glasir_rcas' not in s] == scaling_shaders)
+            print(f"  sharpen {level} {'ok  ' if good else 'FAIL'} "
+                  f"{'the shader, ' + str(strength) + ' stops under its most' if there else 'no shader'}")
+            ok = good and ok
         try:
             mpv('quit')
         except (OSError, ValueError):

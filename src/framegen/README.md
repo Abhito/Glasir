@@ -396,14 +396,35 @@ SDK for `Method=vfg`.
   of that size, and a pass of the add-on's own takes it to its place
   (`fg_resample.h`, `resample.hlsl`) - down from a larger one
   (supersampling), up from a smaller one, and the rest of the way where the
-  place is more than the four times the effect goes to. Made smaller, every
-  source pixel under an output pixel counts, weighted by a Hermite curve
-  (mpv's own default for scaling down, which the other scalers' pictures go
-  through); made larger, Catmull-Rom. The values are averaged as they are,
-  not as light. mpv has no part in it, so the script only
+  place is more than the four times the effect goes to. Catmull-Rom both
+  ways; made smaller, the curve is as much wider as the picture is made
+  smaller, so every source pixel under an output pixel counts (the whole
+  curve down to four times smaller, which is as far as the add-on goes: 16
+  source pixels a direction at most). (A Hermite
+  curve at first, mpv's own default for scaling down: it has no negative
+  lobes and softens what it is given, so a 1440p picture by way of 4K came
+  out softer than it went in. Changed 2026-11-20, and the same day mpv's
+  own scaling down, which the other scalers' pictures and a capture larger
+  than the screen go through, was made Lanczos for the same reason:
+  `dscale` in mpv.conf.) It runs as two passes, across and then down,
+  with a 16-bit picture between them: one pass over both directions gave
+  the same picture and took 1.85 ms for 8K made 1440p on an RTX 5070 Ti,
+  the two take 0.39 ms (0.15 ms for 4K made 1440p; the pass alone, `sr_eval
+  --resample`, nothing of NVIDIA's: the whole run's time with `--runs 2000`
+  less its time with none, by 2000, as the read-back at the end waits for
+  every draw - not the time `--runs` prints, which is the calling thread's).
+  The values are averaged as they are, not as light. The texture between
+  the passes is made with the effect's other textures, before the script is
+  told "ready". mpv has no part in it, so the script only
   makes sure the unscaled picture fits the window whole (a larger one mpv
   would cut off: FSR 1 then). `sr_eval --resample WxH` runs the pass alone,
   to check it against the same sums written out in full.
+- **For the menu:** its top line says the size the effect made the picture
+  on the frame being presented, and the place it then went to where that
+  is another size, `2560x1440 → 3840x2160 (NVIDIA SR) → 2560x1440`
+  (`ScalerHost::made`). For the other scalings glasir_scaling.lua says what
+  it has in place (`user-data/glasir/scaled`, "3840x2160 fsr"), FSR 1 where
+  it stands in for this one.
 - **Testing.** `python tools\scaling_check.py --nvidia [--target 2160]` (it
   passes with FSR 1 standing in too, and says which; with a target it
   prints the sizes the add-on logged). Offline: `sr_eval.exe` runs
@@ -475,7 +496,7 @@ window:
     let go with the swap chain now, and a menu that was open opens again
     (mpv keeps that in `user-data/glasir/menu`);
   - DLSS 5 stays engaged and frame generation goes on (tried in a window).
-- **For the menu:** its top line ends in `G-SYNC` while the driver runs it,
+- **For the menu:** its second line ends in `G-SYNC` while the driver runs it,
   and a borderless window that Windows composes (the black bars skipped,
   without an overlay plane: seen both ways on one evening) gets a line
   saying so.

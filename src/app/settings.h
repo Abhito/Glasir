@@ -43,6 +43,10 @@ struct Settings {
     // from a larger one: supersampling). 0 = screen: the picture's place in
     // the window.
     int scale_to = 0;
+    // sharpen: FSR 1's sharpening pass (RCAS) on the picture as mpv shows
+    // it, whatever scaled it (glasir_scaling.lua, glasir_rcas.glsl): 0 off,
+    // 1 low, 2 medium, 3 high.
+    int sharpen = 0;
     // low_latency: NVIDIA Reflex's low latency mode in mpv (the frame
     // generation add-on asks the driver for it): 0 off, 1 on, 2 on with boost
     // (the GPU kept at full clock speed). Nothing on another GPU.
@@ -99,6 +103,8 @@ const wchar_t *nvidia_quality_name(int quality);
 const wchar_t *scaling_quality_name(int quality);
 // "screen" or the lines: glasir.ini's video.scale_to.
 std::wstring scale_to_name(int scale_to);
+// "off", "low", "medium", "high": glasir.ini's video.sharpen.
+const wchar_t *sharpen_name(int sharpen);
 // "off", "on", "boost": glasir.ini's video.low_latency and the add-on's LowLatency.
 const wchar_t *low_latency_name(int low_latency);
 

@@ -14,7 +14,8 @@ namespace {
 const char *const kProperties[] = {
     "volume", "mute", "fullscreen", "user-data/glasir/audio-boost", "user-data/glasir/audio-delay", "width", "height",
     "user-data/glasir/scaling", "osd-dimensions", "user-data/glasir/signal", "user-data/glasir/rtx-hdr",
-    "user-data/glasir/target", "user-data/glasir/menu", "user-data/glasir/sr",
+    "user-data/glasir/target", "user-data/glasir/menu", "user-data/glasir/sr", "user-data/glasir/scaled",
+    "user-data/glasir/sharpen",
 };
 
 int to_int(const Json &v, int fallback) {
@@ -167,6 +168,8 @@ void MpvClient::on_line(const std::string &line) {
         state_.menu_known = true;
         break;
     case 13: state_.sr = data && data->is(Json::Type::String) ? data->string() : ""; break;
+    case 14: state_.scaled = data && data->is(Json::Type::String) ? data->string() : ""; break;
+    case 15: state_.sharpen = data ? to_int(*data, -1) : -1; break;
     default: break;
     }
 }

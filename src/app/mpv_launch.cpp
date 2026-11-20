@@ -107,6 +107,7 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
     };
     scaling(L"mode", scaling_name(s.scaling));
     scaling(L"target", std::to_wstring(s.scale_to));
+    scaling(L"sharpen", std::to_wstring(s.sharpen));
     scaling(L"vsr", plan.vsr);
     scaling(L"hdr", s.hdr ? L"yes" : L"no");
     scaling(L"rtx_hdr", plan.rtx_hdr && !s.hdr ? L"yes" : L"no");

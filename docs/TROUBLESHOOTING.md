@@ -8,7 +8,7 @@ the zip from `Bug reports\` to an
 
 ## Frame generation does not double the frame rate
 
-Open the menu (`Tab`). Its top line shows the rate, e.g. `60 → 120 fps` when
+Open the menu (`Tab`). Its second line shows the rate, e.g. `60 → 120 fps` when
 frame generation is working. Under "Frame generation" it says why it is not:
 
 - **"Paused, back in N s: the GPU could not keep up"**: mpv dropped frames, so
@@ -43,9 +43,9 @@ tests.
   plane (MPO), which other running apps can take away; it is then composed
   by Windows, a frame later, and frame generation reaches only about 100 of
   120 fps. If the menu shows less than double, turn "Skip the black bars"
-  off. With an NVIDIA GPU the menu says so itself, under the picture's More:
+  off. With an NVIDIA GPU the menu says so itself, under the picture's Display:
   "Windows is composing this window".
-- **Is it on?** With an NVIDIA GPU, the menu's top line ends in `G-SYNC`
+- **Is it on?** With an NVIDIA GPU, the menu's second line ends in `G-SYNC`
   while the driver runs it for Glasir's window.
 - **NVIDIA's video super resolution (Scaling: VSR) and G-SYNC do not run
   together.** The NVIDIA driver turns G-SYNC off for a program while RTX
@@ -79,14 +79,14 @@ generation falls short of double, and the option is better off.
 - With **Picture: Automatic** Glasir tells SDR from HDR by the picture and
   follows the console while you play (about a second for SDR, five for HDR;
   a black screen says nothing, so it waits for a picture). The picture
-  changes in place, with a line at the top saying so. The menu's top line
-  says what it is showing, e.g. `HDR (auto)`.
+  changes in place, with a line at the top saying so. The menu's second
+  line says what it is showing, e.g. `HDR (auto)`.
 - **RTX HDR for SDR** (NVIDIA RTX, with Picture: HDR) needs HDR on in
   Windows and a driver with RTX Video HDR. Where it cannot start, a line at
-  the top says so and the SDR picture is shown as it is; the menu's top line
-  says `SDR (RTX HDR)` while it runs. If a game that is HDR looks glaring and
+  the top says so and the SDR picture is shown as it is; the menu's second
+  line says `SDR (RTX HDR)` while it runs. If a game that is HDR looks glaring and
   wrong with it, Glasir took its signal for SDR: switch RTX HDR for SDR off
-  (the menu, under the picture's More), and everything is shown as HDR.
+  (the menu, under the picture's Display), and everything is shown as HDR.
 - **The colours are wrong with Automatic** (washed out and dim: HDR shown as
   SDR; glaring: SDR shown as HDR): choose SDR or HDR yourself, in the menu or
   Glasir's window. It can happen with a console whose HDR peak is set to
@@ -100,6 +100,21 @@ generation falls short of double, and the option is better off.
 Glasir scales the card's picture to its place on the screen before DLSS 5.
 A capture mode of your screen's height (2560x1440 on a 1440p screen) needs no
 scaling; a 4K capture is scaled down anyway.
+
+For a sharper picture at any capture size, there is **Sharpen** in the menu
+(the picture's "Sharpness and scaling") and in Glasir's window: Low, Medium
+or High. And for
+more real detail, capture larger than the screen where the card can: a 30
+fps game captured at 4K (console set to 4K) and scaled down to a 1440p
+screen shows thin lines whole that a 1440p capture breaks up.
+
+The menu's top line (`Tab`) says what is being done, in order: `1920x1080 →
+2560x1440 (FSR 1)` is a 1080p capture made 1440p by FSR 1, `(mpv)` is mpv's
+own scaling, `3840x2160 → 2560x1440 (scaled down)` a capture larger than
+the screen, and `· Sharpen Medium` is added while Sharpen is on. The
+capture's size alone means it is shown as it comes. Under "Sharpness and
+scaling" the menu also says "Not used now" below a setting that does
+nothing as things are.
 
 For a smaller capture, try "Scaling" in the menu: **FSR 1** gives sharper
 edges on any GPU; **VSR** (NVIDIA RTX, Intel) uses the GPU's video engine
@@ -129,12 +144,14 @@ window offers under Scaling.
   add-on loads NVIDIA's model (FSR 1 scales meanwhile), and does so again
   for another picture size or bit depth.
 
-"Scale to" beside it picks the size the picture is scaled up to. A size
-larger than your screen (4K on a 1440p screen) is scaled down to the screen
-afterwards, which smooths edges: it helps FSR 1 the most, VSR a little, and
-ArtCNN and Anime4K hardly at all. It costs GPU time too; "Screen" is the
-lightest. mpv's own scaling does not use it. With NVIDIA Super Resolution
-it is NVIDIA's model that makes the larger size.
+"Supersample" under it, off by default, has the scaling make a size of its
+own ("Scale to": 1440p, 4K or 8K) before the picture goes to the screen. A
+size larger than your screen (4K on a 1440p screen) is scaled down to the
+screen afterwards, which smooths edges: it helps FSR 1 the most, VSR a
+little, and ArtCNN and Anime4K hardly at all. It costs GPU time too, and
+adds no detail the capture does not have. mpv's own scaling does not use
+it. With NVIDIA Super Resolution it is NVIDIA's model that makes the
+larger size.
 
 ## The capture card does not open
 

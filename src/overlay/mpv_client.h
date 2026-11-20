@@ -22,6 +22,7 @@ struct MpvState {
     int width = 0, height = 0;  // the video's size
     std::string scaling;        // glasir_scaling.lua's mode (user-data/glasir/scaling): mpv, fsr, vsr, cnn, anime4k
     int target = -1;            // the height it scales to (user-data/glasir/target): 0 the screen; -1: not known
+    int sharpen = -1;           // its Sharpen (user-data/glasir/sharpen): 0 off, 1 low, 2 medium, 3 high; -1: not known
     // The menu as the add-on last said it was (user-data/glasir/menu: open or
     // closed; "" if never said), once mpv has answered (menu_known): what an
     // add-on loaded anew goes by.
@@ -30,6 +31,10 @@ struct MpvState {
     // glasir_scaling.lua has mpv draw the picture as large as it comes, for
     // the add-on to make it larger (user-data/glasir/sr: on or off).
     std::string sr;
+    // What glasir_scaling.lua has in place to make the picture larger
+    // (user-data/glasir/scaled): the size and the mode, "3840x2160 fsr"; "":
+    // nothing of its own (mpv's scaler, the add-on, or no need).
+    std::string scaled;
     // What the frames are shown as since Glasir last switched it while
     // playing (user-data/glasir/signal: hdr or sdr); "": as mpv started.
     std::string signal;

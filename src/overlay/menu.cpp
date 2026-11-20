@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <initializer_list>
 #include <string>
 
@@ -34,7 +36,8 @@ struct MenuState {
     int borderless = -1;  // full screen (1) or a window (0) since the menu switched it; -1: as mpv started
     int picture = -1;     // Automatic, SDR or HDR since the menu switched it; -1: as mpv started
     int rtx_hdr = -1;     // RTX HDR for SDR likewise
-    bool more_picture = false, more_sound = false;  // a card's "More" is open
+    bool more_scaling = false, more_display = false, more_sound = false;  // a card's group of settings is open
+    int supersample_lines = 0;  // the size Supersample last had, for switching it on again; 0: none yet
 };
 MenuState g_menu;
 
@@ -52,15 +55,65 @@ float column() { return ImGui::GetFontSize() * 4.4f; }
 bool signal_hdr(const MenuFrame &f, const MpvState &mpv) { return mpv.signal.empty() ? f.source_hdr : mpv.signal == "hdr"; }
 int picture_mode(const MenuFrame &f) { return g_menu.picture >= 0 ? g_menu.picture : f.picture; }
 
-std::string status_line(const MenuFrame &f, const MpvState &mpv) {
+// The picture as large as fits mpv's window: how many times its own size
+// (0: not known yet). Over 1, it is scaled up to get there.
+double window_fit(const MpvState &mpv) {
+    if (mpv.width <= 0 || mpv.height <= 0 || mpv.osd.w <= 0 || mpv.osd.h <= 0) return 0;
+    return std::min(double(mpv.osd.w) / mpv.width, double(mpv.osd.h) / mpv.height);
+}
+
+// The menu's first line: the picture's way to the screen, in order - its size
+// as it comes, the size a scaling makes it and which, the size it is shown at
+// where that is another, and Sharpen where it runs: on mpv's finished
+// picture, which with NVIDIA Super Resolution is the capture before the
+// add-on scales it.
+std::string picture_line(const MpvState &mpv) {
     char text[160];
     std::string out;
-    if (mpv.width > 0 && mpv.height > 0) {
-        std::snprintf(text, sizeof(text), "%dx%d", mpv.width, mpv.height);
-        out = text;
+    if (mpv.width <= 0 || mpv.height <= 0) return out;
+    std::snprintf(text, sizeof(text), "%dx%d", mpv.width, mpv.height);
+    out = text;
+    static const char *const kSharpen[] = {"", "Low", "Medium", "High"};
+    const std::string sharpen = mpv.sharpen > 0 ? std::string("Sharpen ") + kSharpen[std::min(mpv.sharpen, 3)] : "";
+    // Its place in the window (as large as fits), once mpv has said how large the window is.
+    const double fit = window_fit(mpv);
+    const int place_w = int(std::lround(mpv.width * fit)), place_h = int(std::lround(mpv.height * fit));
+    auto size = [&](int w, int h, const char *note) {
+        std::snprintf(text, sizeof(text), " \xE2\x86\x92 %dx%d%s%s%s", w, h, note ? " (" : "", note ? note : "", note ? ")" : "");
+        out += text;
+    };
+    // What a scaling makes it, and which: the add-on says for its own (of the frame being presented),
+    // glasir_scaling.lua for what it has in place in mpv.
+    static const char *const kModes[] = {"fsr", "vsr", "cnn", "anime4k"};
+    static const char *const kNames[] = {"FSR 1", "VSR", "ArtCNN", "Anime4K"};
+    int w = 0, h = 0;
+    char mode[16] = "";
+    const char *by = nullptr;
+    const ScalerHost &scaler = scaler_host();
+    if (scaler.made && scaler.made(w, h)) {
+        by = "NVIDIA SR";
+        if (!sharpen.empty()) out += " (" + sharpen + ")";  // sharpened before NVIDIA's model
+    } else if (sscanf_s(mpv.scaled.c_str(), "%dx%d %15s", &w, &h, mode, unsigned(sizeof(mode))) == 3) {
+        for (int i = 0; i < 4; ++i)
+            if (std::strcmp(mode, kModes[i]) == 0) by = kNames[i];
     }
-    out += out.empty() ? "" : "  \xC2\xB7  ";
-    out += signal_hdr(f, mpv) ? "HDR" : mpv.rtx_hdr == "on" ? "SDR (RTX HDR)" : "SDR";
+    if (by) {
+        size(w, h, by);
+        // From there to its place, where that is another size (Supersample: down from a larger one).
+        if (fit > 0 && (std::abs(w - place_w) > 2 || std::abs(h - place_h) > 2)) size(place_w, place_h, nullptr);
+    } else if (fit > 1.001) {
+        size(place_w, place_h, "mpv");  // mpv's own scaler takes it there
+    } else if (fit > 0 && fit < 0.999) {
+        size(place_w, place_h, "scaled down");
+    }
+    if (!sharpen.empty() && !(by && std::strcmp(by, "NVIDIA SR") == 0)) out += "  \xC2\xB7  " + sharpen;
+    return out;
+}
+
+// Its second: SDR or HDR, the frame rate, and G-SYNC.
+std::string status_line(const MenuFrame &f, const MpvState &mpv) {
+    char text[160];
+    std::string out = signal_hdr(f, mpv) ? "HDR" : mpv.rtx_hdr == "on" ? "SDR (RTX HDR)" : "SDR";
     if (picture_mode(f) == 0) out += " (auto)";
     if (f.host && f.host->rates) {
         double source = 0, real = 0, generated = 0;
@@ -78,10 +131,12 @@ std::string status_line(const MenuFrame &f, const MpvState &mpv) {
     return out;
 }
 
-void picture_more(const MenuFrame &f, const MpvState &mpv);
+void scaling_more(const MenuFrame &f, const MpvState &mpv);
+void display_more(const MenuFrame &f, const MpvState &mpv);
 
 // What a player switches while playing: DLSS 5 and frame generation. What
-// is set once is under the card's "More".
+// is set once is in the card's two groups, "Sharpness and scaling" and
+// "Display".
 void picture(const MenuFrame &f, const MpvState &mpv) {
     ui::section("PICTURE");
     ui::begin_card("picture");
@@ -216,7 +271,11 @@ void picture(const MenuFrame &f, const MpvState &mpv) {
         ImGui::EndDisabled();
         ui::note("Frame generation needs Glasir's own capture with dedup (not the DirectShow fallback).");
     }
-    if (mpv.connected && ui::disclosure("More", &g_menu.more_picture)) picture_more(f, mpv);
+    // What is set once, in two groups that say what is in them.
+    if (mpv.connected) {
+        if (ui::disclosure("Sharpness and scaling", &g_menu.more_scaling)) scaling_more(f, mpv);
+        if (ui::disclosure("Display", &g_menu.more_display)) display_more(f, mpv);
+    }
     ui::end_card();
 }
 
@@ -253,11 +312,30 @@ void sound(const MenuFrame &f, const MpvState &mpv, double now) {
     ui::end_card();
 }
 
-// The picture's settings that are set once, under its card's "More": how it
-// is scaled and shown, and SDR or HDR.
-void picture_more(const MenuFrame &f, const MpvState &mpv) {
+// What is set once about how sharp the picture is, under "Sharpness and
+// scaling" in its card: Sharpen, how a smaller capture is scaled up, and
+// Supersample. Each says so when it does nothing as things are.
+void scaling_more(const MenuFrame &f, const MpvState &mpv) {
+    // FSR 1's sharpening pass on the picture as it is shown (glasir_rcas.glsl), whatever scaled it.
+    if (mpv.sharpen >= 0) {
+        static const char *const kSharpen[] = {"off", "low", "medium", "high"};
+        const int sharpen = ui::choice("Sharpen", {"Off", "Low", "Medium", "High"}, std::min(mpv.sharpen, 3), column(),
+                                       "Sharpens the picture as it is shown, whatever its size, for next to no GPU "
+                                       "time. DLSS 5 keeps most of it. High also brings up a game's grain. FSR 1 has "
+                                       "sharpening of its own: this adds to it. With NVIDIA SR it sharpens the "
+                                       "capture, before NVIDIA's model scales it.");
+        if (sharpen >= 0) {
+            f.mpv->command({"script-message", "glasir-sharpen", std::to_string(sharpen)});
+            save(f, "video", "sharpen", kSharpen[sharpen]);
+        }
+    }
     // Scaling up (glasir_scaling.lua in mpv): switched at once.
     if (!mpv.scaling.empty()) {
+        // What is used as things are: a scaling where the picture is made larger - to the size
+        // Supersample names, or else to its place in the window.
+        const double fit = window_fit(mpv);
+        const bool supersample = mpv.target > 0;
+        const bool target_larger = supersample && mpv.height > 0 && mpv.target > mpv.height * 1.001;
         static const char *const kModes[] = {"mpv", "fsr", "vsr", "nvidia", "cnn", "anime4k"};
         static const char *const kLabels[] = {"mpv (Lanczos)", "FSR 1 (sharper)", "VSR (NVIDIA RTX, Intel)",
                                               "NVIDIA SR (quality levels, G-SYNC)", "ArtCNN (more GPU time)",
@@ -287,6 +365,13 @@ void picture_more(const MenuFrame &f, const MpvState &mpv) {
             }
             ImGui::EndCombo();
         }
+        // Nothing for it to scale up: say so, or the choice looks as if it did something.
+        if (fit > 0 && fit <= 1.001 && !(target_larger && mpv.scaling != "mpv"))
+            ui::note(fit < 0.999 ? "Not used now: the capture is larger than the window, and is scaled down to it."
+                                 : "Not used now: the capture already fills the window.");
+        else if (fit > 1.001 && supersample && mpv.height > 0 && !target_larger && mpv.scaling != "mpv")
+            ui::note("Not used now: the capture is as large as Supersample's size, so mpv's own scaler takes it to "
+                     "the window.");
         // NVIDIA Super Resolution's model, switched at once.
         if (current == kNvidia && scaler.level && scaler.set_level) {
             static const char *const kQuality[] = {"low", "medium", "high", "ultra"};
@@ -302,26 +387,52 @@ void picture_more(const MenuFrame &f, const MpvState &mpv) {
             if (scaler.state && scaler.state() < 0)
                 ui::warn("NVIDIA Super Resolution cannot run here (ReShade.log says why; Glasir's window offers its "
                          "download): FSR 1 scales instead.");
+            // Supersampling a capture larger than the window: the add-on only gets the picture at the window's
+            // size, so FSR 1 makes the larger one in mpv.
+            else if (fit > 0 && fit < 0.999 && target_larger)
+                ui::note("Not used now: the capture is larger than the window, so FSR 1 makes Supersample's size.");
         }
-        // The size it scales to: the picture's place on the screen, or a
-        // size of its own (down to the screen from a larger one).
+        // Supersample (glasir.ini video.scale_to): the scaling makes a size of its own, which then
+        // goes to the screen - down from a larger one. One switch to have it or not; its size only
+        // while it is on.
         if (mpv.target >= 0) {
-            static constexpr int kLines[] = {0, 1440, 2160, 2880};
-            static const char *const kNames[] = {"screen", "1440", "2160", "2880"};
-            int at = -1;  // a height from glasir.ini that is none of these: none is lit
-            for (int i = 0; i < 4; ++i)
-                if (kLines[i] == mpv.target) at = i;
-            const int to = ui::choice("Scale to", {"Screen", "1440p", "4K", "5K"}, at, column(),
-                                      "The size the picture is scaled up to. A size larger than the screen is scaled "
-                                      "down to it afterwards: smoother edges and finer detail, for more GPU time. "
-                                      "Not used by mpv's own scaling.");
-            if (to >= 0) {
-                f.mpv->command({"script-message", "glasir-target", std::to_string(kLines[to])});
-                save(f, "video", "scale_to", kNames[to]);
+            static constexpr int kLines[] = {1440, 2160, 4320};
+            if (supersample) g_menu.supersample_lines = mpv.target;
+            bool on = supersample;
+            if (ui::toggle("Supersample", &on,
+                           "Has the scaling make a size of its own first (Scale to), from which the picture goes to "
+                           "the screen: larger than the screen, it is scaled down to it, for smoother edges and more "
+                           "GPU time. Off: the picture is scaled to the screen and no further.")) {
+                // The size it had before, or the first one taller than the window and the capture.
+                int lines = g_menu.supersample_lines;
+                for (int i = 0; lines <= 0 && i < 3; ++i)
+                    if (kLines[i] > std::max(mpv.osd.h, mpv.height) || i == 2) lines = kLines[i];
+                f.mpv->command({"script-message", "glasir-target", std::to_string(on ? lines : 0)});
+                save(f, "video", "scale_to", on ? std::to_string(lines) : "screen");
+            }
+            if (supersample) {
+                int at = -1;  // a height from glasir.ini that is none of these: none is lit
+                for (int i = 0; i < 3; ++i)
+                    if (kLines[i] == mpv.target) at = i;
+                const int to = ui::choice("Scale to", {"1440p", "4K", "8K"}, at, column(),
+                                          "The size the picture is scaled up to before it goes to the screen. A "
+                                          "scaling makes it at most four times larger.");
+                if (to >= 0) {
+                    f.mpv->command({"script-message", "glasir-target", std::to_string(kLines[to])});
+                    save(f, "video", "scale_to", std::to_string(kLines[to]));
+                }
+                if (mpv.scaling == "mpv")
+                    ui::note("Not used now: mpv's own scaling goes straight to the screen. Pick another Scaling.");
+                else if (mpv.height > 0 && !target_larger)
+                    ui::note("Not used now: the capture is as large as this size.");
             }
         }
     }
+}
 
+// How the picture is shown, under "Display" in its card: the window, SDR or
+// HDR, and NVIDIA Reflex.
+void display_more(const MenuFrame &f, const MpvState &mpv) {
     // Glasir moves mpv's window (and the black around a picture of another
     // shape than the screen); mpv changes its border.
     // Full screen is mpv's own (f and a double-click switch it too); leaving
@@ -427,7 +538,9 @@ void draw_toast(const std::string &text, float alpha, float scale) {
 
 // The panel at the right of the picture: what is switched while playing
 // (DLSS 5, frame generation, the volume) in sight, what is set once behind
-// each card's "More", which stays as it was left while Glasir runs.
+// each card's groups, which stay as they were left while Glasir runs. At the
+// top, two lines say what happens to the picture: its way to the screen, and
+// SDR or HDR, the rate and G-SYNC.
 bool draw_menu(const MenuFrame &f) {
     ImGuiIO &io = ImGui::GetIO();
     const double now = ImGui::GetTime();
@@ -450,6 +563,8 @@ bool draw_menu(const MenuFrame &f) {
     ImGui::TextUnformatted("Glasir");
     ImGui::PopStyleColor();
     ImGui::PopFont();
+    const std::string way = picture_line(mpv);
+    if (!way.empty()) ui::note(way.c_str());
     ui::note(status_line(f, mpv).c_str());
 
     picture(f, mpv);

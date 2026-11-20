@@ -165,9 +165,10 @@ int main(int argc, char **argv) {
         double sum = 0;
         for (int run = 0; run <= runs; ++run) {
             const double t = now_ms();
-            if (resample)
-                to_size.draw(ctx.Get(), source_view.Get(), w, h, target_view.Get(), 0, 0, pass.w, pass.h);
-            else if (!sr.draw(ctx.Get(), source_view.Get(), target_view.Get(), 0, 0, error))
+            if (resample) {
+                if (!to_size.draw(ctx.Get(), source_view.Get(), w, h, target_view.Get(), 0, 0, pass.w, pass.h))
+                    return fprintf(stderr, "sr_eval: no texture between the passes\n"), 1;
+            } else if (!sr.draw(ctx.Get(), source_view.Get(), target_view.Get(), 0, 0, error))
                 return fprintf(stderr, "sr_eval: %s\n", error.c_str()), 1;
             if (run > 0) sum += now_ms() - t;  // the first one aside
         }

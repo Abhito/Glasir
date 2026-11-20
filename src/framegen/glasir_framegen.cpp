@@ -1606,14 +1606,16 @@ const char *sr_quality_name(fg::SrLevel level) {
 }
 
 class Upscale {
-    // The sizes and format one effect and its textures are made for.
+    // The sizes and format one effect and its textures are made for: the picture as it comes, as
+    // the effect makes it, and its place (the texture between fg_resample.h's passes is as wide as
+    // that).
     struct Key {
-        UINT in_w = 0, in_h = 0, sr_w = 0, sr_h = 0;
+        UINT in_w = 0, in_h = 0, sr_w = 0, sr_h = 0, out_w = 0, out_h = 0;
         DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
         bool direct = false;
         bool operator==(const Key &o) const {
-            return in_w == o.in_w && in_h == o.in_h && sr_w == o.sr_w && sr_h == o.sr_h && format == o.format &&
-                   direct == o.direct;
+            return in_w == o.in_w && in_h == o.in_h && sr_w == o.sr_w && sr_h == o.sr_h && out_w == o.out_w &&
+                   out_h == o.out_h && format == o.format && direct == o.direct;
         }
     };
 
@@ -1669,10 +1671,11 @@ public:
         const UINT out_h = std::min(bb.Height, UINT(std::lround(in_h * fit)));
         const UINT x = (bb.Width - out_w) / 2, y = (bb.Height - out_h) / 2;
         // What the effect makes: the target's size (as glasir_scaling.lua counts it), or its place; up
-        // to the four times it goes to.
+        // to the four times it goes to, and no wider than a Direct3D 11 texture can be.
         UINT sr_w = out_w, sr_h = out_h;
         if (shown.target > 0) {
-            sr_h = UINT(in_h * std::min(double(shown.target) / in_h, 4.0) / 2) * 2;
+            const double most = double(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) / in_w;
+            sr_h = UINT(in_h * std::min({double(shown.target) / in_h, 4.0, most}) / 2) * 2;
             sr_w = UINT(in_w * (double(sr_h) / in_h) / 2 + 0.5) * 2;
         } else if (fit > 4.0) {
             sr_w = in_w * 4;
@@ -1681,7 +1684,7 @@ public:
         // Nothing to make larger: the script has mpv scale again in a moment.
         if (sr_h <= in_h * 1.001) return;
         const bool direct = sr_w == out_w && sr_h == out_h;
-        const Key key{in_w, in_h, sr_w, sr_h, bb.Format, direct};
+        const Key key{in_w, in_h, sr_w, sr_h, out_w, out_h, bb.Format, direct};
         if (key == failed_) return;  // said when it failed; another size tries again
         bool ten_bit = false;
         if (!fg::Sr::takes(bb.Format, ten_bit)) return fail(key, "it does not take this picture format");
@@ -1712,6 +1715,9 @@ public:
                     FAILED(device->CreateRenderTargetView(made_.Get(), nullptr, &made_target_)))
                     return fail(key, "no texture for the larger picture");
                 if (!to_place_.ready() && !to_place_.create(device, error)) return fail(key, error.c_str());
+                // Its texture between the passes now, while FSR 1 still scales: not at the first draw.
+                if (!to_place_.prepare(out_w, sr_h))
+                    return fail(key, "no texture for taking the larger picture to its place");
             }
             g_kept_devices.keep();  // before the SDK starts NGX (KeptDevices, above)
             if (!sr_.create(device, in_w, in_h, sr_w, sr_h, ten_bit, vfg_runtime_folder(), g_settings.sr_level, error))
@@ -1753,12 +1759,15 @@ public:
             } else {
                 if (!sr_.draw(ctx.Get(), copy_view_.Get(), made_target_.Get(), 0, 0, error))
                     return fail(key, error.c_str());
-                to_place_.draw(ctx.Get(), made_view_.Get(), sr_w, sr_h, target.Get(), x, y, out_w, out_h);
+                if (!to_place_.draw(ctx.Get(), made_view_.Get(), sr_w, sr_h, target.Get(), x, y, out_w, out_h))
+                    return fail(key, "no texture for taking the larger picture to its place");
             }
         }
         const D3D11_BOX to{x, y, 0, x + out_w, y + out_h, 1};
         glasir::overlay::set_scaled_picture(&to);
         running_ = true;
+        made_w_ = sr_w;
+        made_h_ = sr_h;
         nvidia_ran();
     }
 
@@ -1785,6 +1794,13 @@ public:
         log_line(reshade::log::level::info, "SrQuality=%s (from the menu)", sr_quality_name(g_settings.sr_level));
     }
     int state() const { return running_ ? 1 : (wanted_ && told_ < 0 ? -1 : 0); }
+    // The size the effect made the picture on the frame being presented (the menu's top line).
+    bool made(int &width, int &height) const {
+        if (!running_) return false;
+        width = int(made_w_);
+        height = int(made_h_);
+        return true;
+    }
 
 private:
     // Tells glasir_scaling.lua, once for each change, whether the picture can be scaled here.
@@ -1818,6 +1834,7 @@ private:
         made_.Reset();
         made_view_.Reset();
         made_target_.Reset();
+        to_place_.let_go();
     }
 
     fg::Sr sr_;
@@ -1834,6 +1851,7 @@ private:
     int mismatch_ = 0;                // frames on end where mpv's picture was not where expected
     ID3D11Device *device_ = nullptr;  // what all this was made on (not held)
     bool running_ = false;            // the frame being presented was scaled here
+    UINT made_w_ = 0, made_h_ = 0;    // and the effect made it this large
     int told_ = 0;                    // what the script was last told: 1 ready, -1 unavailable, 0 nothing yet
 };
 
@@ -3295,6 +3313,7 @@ void set_menu_host() {
     scaler.level = [] { return g_upscale.level(); };
     scaler.set_level = [](int level) { g_upscale.set_level(level); };
     scaler.state = [] { return g_upscale.state(); };
+    scaler.made = [](int &width, int &height) { return g_upscale.made(width, height); };
     glasir::overlay::set_scaler_host(scaler);
 }
 
