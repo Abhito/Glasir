@@ -1504,6 +1504,70 @@ void nvidia_ran() {
 }
 bool nvidia_ran_lately() { return g_presents_since_nvidia < 64 || qpc_seconds() - g_nvidia_ran_at < 5.0; }
 
+// ---- Direct3D 12 devices kept until mpv ends -------------------------------------
+//
+// mpv crashed in its last moments where NVIDIA Super Resolution (below) and
+// DLSS 5 had both run: exit code 0xC0000005, and with an 8-bit capture no new
+// start for the menu's Picture change (found 2026-11-19, the day 0.4.0 came
+// out; src/framegen/README.md, NVIDIA Super Resolution, has how).
+//
+// Both use NVIDIA's NGX, of which a process has one: DLSS 5 through
+// Direct3D 12, on a device its feeder makes; the super resolution through the
+// Video Effects SDK. Where the SDK was the first to start NGX - at every start
+// with scaling = nvidia, and when DLSS 5 is switched on later - one of NGX's
+// model DLLs (NGX\models\dlssg) gives that device back once more than it took
+// it, in its clean-up as the process ends. The device is long gone by then:
+// the DLSS 5 add-ons let go of it when mpv's picture closes. With DLSS 5
+// first there is no such release, nor with NVIDIA Video Frame Generation,
+// which does not start NGX.
+//
+// None of that code is Glasir's. So from the moment the SDK is asked for the
+// super resolution, every Direct3D 12 device made in mpv gets two references
+// that are never given back: NGX's extra release then finds a device that is
+// there, and (with two) does not end it either - nothing is taken apart while
+// the process is. The devices go with the process. ReShade, which counts the
+// references of the devices it wraps, says so in its log when the DLSS 5
+// add-ons let go of theirs ("Reference count for ID3D12Device ... is
+// inconsistent (2)"): that line is this.
+class KeptDevices {
+public:
+    // ReShade's init_device and destroy_device, for Direct3D 12 devices.
+    void made(IUnknown *device) {
+        std::lock_guard lock(mutex_);
+        if (keep_)
+            hold(device);
+        else
+            known_.push_back(device);
+    }
+    void going(IUnknown *device) {
+        std::lock_guard lock(mutex_);
+        known_.erase(std::remove(known_.begin(), known_.end(), device), known_.end());
+    }
+    // The Video Effects SDK is about to start NGX: from here on, and for the devices there are.
+    void keep() {
+        std::lock_guard lock(mutex_);
+        if (keep_) return;
+        keep_ = true;
+        for (IUnknown *device : known_) hold(device);
+        known_.clear();
+    }
+
+private:
+    void hold(IUnknown *device) {
+        device->AddRef();
+        device->AddRef();
+        log_line(reshade::log::level::info,
+                 "a Direct3D 12 device in mpv is kept until mpv ends: NVIDIA's NGX gives it back once too often then, "
+                 "after its Video Super Resolution has run");
+    }
+
+    std::mutex mutex_;
+    std::vector<IUnknown *> known_;  // made, still there, not held
+    bool keep_ = false;
+};
+
+KeptDevices g_kept_devices;
+
 // ---- NVIDIA Super Resolution ---------------------------------------------------
 //
 // video.scaling = nvidia: the capture is made as large as its place in the
@@ -1649,6 +1713,7 @@ public:
                     return fail(key, "no texture for the larger picture");
                 if (!to_place_.ready() && !to_place_.create(device, error)) return fail(key, error.c_str());
             }
+            g_kept_devices.keep();  // before the SDK starts NGX (KeptDevices, above)
             if (!sr_.create(device, in_w, in_h, sr_w, sr_h, ten_bit, vfg_runtime_folder(), g_settings.sr_level, error))
                 return fail(key, error.c_str());
             format_ = bb.Format;
@@ -3181,7 +3246,15 @@ void on_destroy_swapchain(reshade::api::swapchain *swapchain, bool resize) {
     }
 }
 
+// Direct3D 12 devices are other add-ons' (DLSS 5's feeder makes one): KeptDevices.
+void on_init_device(reshade::api::device *device) {
+    if (device->get_api() == reshade::api::device_api::d3d12)
+        g_kept_devices.made(reinterpret_cast<IUnknown *>(device->get_native()));
+}
+
 void on_destroy_device(reshade::api::device *device) {
+    if (device->get_api() == reshade::api::device_api::d3d12)
+        g_kept_devices.going(reinterpret_cast<IUnknown *>(device->get_native()));
     if (!g_gen.owns(device)) return;
     glasir::overlay::release();
     g_upscale.release();
@@ -3238,6 +3311,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         g_panel = fg::reshade_ui::init(reshade::internal::get_reshade_module_handle());
         if (g_panel) reshade::register_overlay(nullptr, draw_panel);
         reshade::register_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
+        reshade::register_event<reshade::addon_event::init_device>(on_init_device);
         reshade::register_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
         reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);
         register_present_events();
@@ -3247,6 +3321,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         unregister_present_events();
         reshade::unregister_event<reshade::addon_event::destroy_device>(on_destroy_device);
         reshade::unregister_event<reshade::addon_event::destroy_swapchain>(on_destroy_swapchain);
+        reshade::unregister_event<reshade::addon_event::init_device>(on_init_device);
         reshade::unregister_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
         reshade::unregister_addon(module);
         g_link.close();

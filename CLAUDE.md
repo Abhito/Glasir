@@ -117,7 +117,14 @@
   --resample WxH` runs that pass alone, to check against the same sums in
   numpy after a change. NVIDIA's licence covers it as it does frame
   generation: no scores or timings of it anywhere but in chat with the
-  owner.
+  owner. It shares NVIDIA's NGX with DLSS 5, and 0.4.0 crashed mpv at exit
+  where both had run (NGX releases DLSS 5's Direct3D 12 device once too
+  often when the SDK started NGX first): `KeptDevices` in the add-on holds
+  two references on such devices, never given back. After a change near
+  either, run with both on and look at mpv's end: "mpv exited (code 0)" in
+  logs\glasir.log (the tools fail on anything else) and no new `[crash]`
+  in `engine\RenoDX-DLSS5-crash.log`. A crash at exit shows nowhere else:
+  the picture is already closed and Glasir's own exit code is 0.
 - NVIDIA Video Frame Generation (`Method=vfg`, `src/framegen/fg_vfg.h`, its
   section in src/framegen/README.md): an opt-in generator on RTX 40/50,
   glasir.ini `[framegen] method = nvidia`, `nvidia_quality`. Its DLLs are
