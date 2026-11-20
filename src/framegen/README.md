@@ -410,6 +410,30 @@ SDK for `Method=vfg`.
   `fg_sr.h` on raw pixels, and `eval\sr_eval.py --exe sr_eval.exe` checks
   that it gives the bytes the SDK gives on its own (`--device` picks the
   CUDA device on a PC with two GPUs).
+- **DLSS 5's Direct3D 12 device is kept until mpv ends** (`KeptDevices` in
+  glasir_framegen.cpp). In 0.4.0 mpv crashed in its last moments wherever
+  this and DLSS 5 had both run (exit code 0xC0000005; with an 8-bit capture
+  the menu's Picture change then did not start the picture again). Found
+  with a debugger on mpv's exit:
+  - Both use NVIDIA's NGX, of which the process has one: DLSS 5 through
+    Direct3D 12, on a device its feeder makes; this through the SDK.
+  - Where the SDK starts NGX first (at every start with `scaling = nvidia`,
+    and when DLSS 5 is switched on later), one of NGX's model DLLs
+    (`NGX\models\dlssg`) gives that device back once more than it took it,
+    in its clean-up as the process ends, when the device is long gone.
+  - With DLSS 5 first there is no such release; nor with `Method=vfg`, which
+    does not start NGX; nor when the effect is let go before mpv ends.
+  - None of that code is Glasir's, so from the moment the SDK is asked for
+    the effect, every Direct3D 12 device made in mpv gets two references
+    that are never given back (ReShade's `init_device`): the extra release
+    finds a device that is there, and does not end it either. ReShade says
+    so in its log when the DLSS 5 add-ons let go of theirs, "Reference
+    count for ID3D12Device ... is inconsistent (2)": that line is this, and
+    it is only there where this scaling ran.
+  - `tools\smoke_raw.py` and `scaling_check.py` fail when mpv's exit code
+    is not 0 (logs\glasir.log: "mpv exited (code ...)"); the DLSS 5
+    add-on's `engine\RenoDX-DLSS5-crash.log` has a `[crash]` entry with the
+    stack for each such end.
 - **Tried** with a test pattern in a window, SDR and HDR, with and without
   frame generation and DLSS 5; not yet with a card and a console.
 - **No results in public**, as for `Method=vfg`: no scores or timings of it

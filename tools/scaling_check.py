@@ -243,6 +243,14 @@ def main():
             for line in f:
                 if 'NVIDIA Video Super Resolution' in line:
                     print('  ' + line.rstrip().split(' | ')[-1])
+    # mpv must end as cleanly as it ran: Glasir's own exit code does not say.
+    log = os.path.join(a.app, 'logs', 'glasir.log')
+    if os.path.exists(log):
+        with open(log, encoding='utf-8-sig', errors='replace') as f:
+            for line in f:
+                if 'mpv exited (code ' in line and 'mpv exited (code 0)' not in line:
+                    print('  FAIL ' + line.rstrip().split(' ', 1)[-1])
+                    ok = False
     print('PASS' if ok and glasir.returncode == 0 else 'FAIL')
     return 0 if ok and glasir.returncode == 0 else 1
 

@@ -1206,7 +1206,11 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     }
     // The quit event stays set until the next Glasir takes the lock.
     quit_asked = WaitForSingleObject(quit_event, 0) == WAIT_OBJECT_0;
-    log(L"mpv exited (code {})", mpv.exit_code());
+    // 0xC0000005 and its like: mpv, or something loaded into it, crashed as it closed.
+    if (mpv.exit_code() >= 0xC0000000)
+        log(L"mpv exited (code 0x{:08X}: it crashed as it closed)", mpv.exit_code());
+    else
+        log(L"mpv exited (code {})", mpv.exit_code());
     changes.stop();
     keep_changes(changes, settings_path);
     if (g_found_hdr && *g_found_hdr != found_before)

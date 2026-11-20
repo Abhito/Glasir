@@ -119,6 +119,10 @@ def main():
             for line in f:
                 if 'started mpv' not in line:
                     print('  ' + line.rstrip())
+                # mpv must end as cleanly as it ran: Glasir's own exit code does not say.
+                if 'mpv exited (code ' in line and 'mpv exited (code 0)' not in line:
+                    print('mpv did not end cleanly')
+                    ok = False
     print(f'Glasir exit code {glasir.returncode}')
     print('PASS' if ok and glasir.returncode == 0 else 'FAIL')
     return 0 if ok and glasir.returncode == 0 else 1
