@@ -24,19 +24,23 @@ for Windows 11 · [How to install](#-installing)
 
 - **30 fps games, smooth at 60.** Motion-compensated frame generation
   (30 → 60, 60 → 120 fps) on any GPU: NVIDIA, AMD or Intel. On an RTX 40 or
-  50 series GPU, NVIDIA Video Frame Generation can make the frames instead.
+  50 series GPU, NVIDIA Video Frame Generation can make the frames instead,
+  with a Quality that Glasir can pick for you as the load changes (Auto).
 - **HDR that looks right from the start.** Glasir tells from the picture
   whether the console sends SDR or HDR and follows it while you play, with
   nothing to calibrate. On an NVIDIA RTX GPU the screen can stay in HDR, with
   SDR games turned into HDR by RTX Video HDR.
 - **DLSS 5 neural rendering** on NVIDIA RTX 30, 40 and 50 series GPUs.
 - **Sharper than the card sends it.** A 1080p capture scaled up to your
-  screen by a neural network, not just stretched (see [Scaling](#scaling)).
+  screen by a neural network, not just stretched, or scaled beyond your
+  screen's size and back down for smoother edges (see [Scaling](#scaling)).
 - **Even frame pacing.** VRR / G-SYNC / FreeSync support, and repeated
   frames from the card are dropped, so a 30 fps game is shown at an even
   30 fps.
 - **Low-latency sound** from the card (WASAPI), with boost and a lip-sync
   delay.
+- **NVIDIA Reflex** low latency mode on NVIDIA GPUs, as a choice (see
+  [NVIDIA Reflex](#nvidia-reflex)).
 - **An in-game menu** (`Tab`), drawn after DLSS 5 and frame generation, so
   it stays sharp and quick.
 - **Screenshots** (`s`) of the picture on screen, in HDR too (`.jxr`).
@@ -63,7 +67,7 @@ for Windows 11 · [How to install](#-installing)
 |---|---|
 | **System** | Windows 11, 64-bit |
 | **Capture card** | Any card Windows' own video capture can open gets every feature. Other cards run in a basic mode (no frame generation, no dropping of repeated frames), and Glasir tells you when that happens. |
-| **GPU** | Any DirectX 11 GPU for frame generation and upscaling. NVIDIA RTX or Intel for video super resolution. NVIDIA RTX 30, 40 or 50 series for DLSS 5 (it takes more GPU time on the older ones). NVIDIA RTX 40 or 50 series for NVIDIA Video Frame Generation, an optional download. |
+| **GPU** | Any DirectX 11 GPU for frame generation and upscaling. NVIDIA RTX or Intel for video super resolution. NVIDIA RTX 30, 40 or 50 series for DLSS 5 (it takes more GPU time on the older ones). NVIDIA RTX 40 or 50 series for NVIDIA Video Frame Generation, and NVIDIA RTX for NVIDIA Super Resolution: one optional download. |
 | **Screen** | A VRR screen (G-SYNC or FreeSync) is best for frame pacing, but not needed. |
 
 We can't promise that every capture card works.
@@ -107,9 +111,11 @@ To remove Glasir, delete its folder.
   [RHI's mirror](https://github.com/RankFTW/rhi-repo),
   [NVIDIA DLSS](https://github.com/NVIDIA/DLSS)
 
-Only if you ask for it (Frame generation, "Made by: NVIDIA", then "Download
-it"), and after you accept NVIDIA's licences: NVIDIA Video Frame Generation,
-from [NVIDIA's package index](https://pypi.nvidia.com/nvidia-vfx/) (about
+Only if you ask for it (Frame generation, "Made by: NVIDIA", or Scaling,
+"NVIDIA Super Resolution"; then "Download it"), and after you accept
+NVIDIA's licences: NVIDIA Video Frame Generation and NVIDIA's Video Super
+Resolution, which come in one package from
+[NVIDIA's package index](https://pypi.nvidia.com/nvidia-vfx/) (about
 440 MB).
 
 Each Glasir downloads the versions it was tested with, so a new release of
@@ -247,11 +253,108 @@ the menu (it switches at once):
 | mpv's own (Lanczos) | any | Plain, the lightest |
 | **AMD FSR 1** | any | Sharper edges |
 | **Video super resolution** (VSR) | NVIDIA RTX, Intel | The GPU's video engine; FSR 1 where it cannot run |
+| **NVIDIA Super Resolution** | NVIDIA RTX | NVIDIA's super resolution run by Glasir itself: a Quality you pick here, and G-SYNC stays. An optional download (below); FSR 1 where it cannot run |
 | **ArtCNN** | any | A small neural network that rebuilds fine detail; the sharpest, for some more GPU time |
 | **Anime4K** | any | Made for drawn and cel-shaded styles (can look painted on realistic games); the most GPU time |
 
 A capture mode of the screen's height (2560x1440 on a 1440p screen) needs no
 scaling at all.
+
+NVIDIA's video super resolution has quality levels, 1 to 4 and Auto. They
+are the driver's setting, the same for every program, and Glasir cannot set
+them: choose the level in the NVIDIA app (System, Video, Super resolution)
+or the NVIDIA Control Panel (Adjust video image settings). Glasir's window
+has a button that opens the app when VSR is chosen.
+
+> [!NOTE]
+> **G-SYNC does not run while NVIDIA's video super resolution does**: the
+> NVIDIA driver turns it off for a program that uses RTX VSR. For G-SYNC,
+> pick another scaling (NVIDIA Super Resolution keeps it). Switching away
+> from VSR in the menu starts the picture again (a second or two), which is
+> what brings G-SYNC back.
+
+**NVIDIA Super Resolution** (`[video] scaling = nvidia`) is NVIDIA's Video
+Super Resolution from its Video Effects SDK, run by Glasir's add-on in
+place of the driver's. What that changes:
+
+- **Quality** (beside Scaling; `[video] scaling_quality`): Low, Medium (the
+  default), High or Ultra, NVIDIA's four models for a clean picture such as
+  a console's. The menu switches them while you play. A higher one is a
+  larger model and takes more GPU time, which DLSS 5 and frame generation
+  also need: if frame generation falls short of double or starts pausing,
+  pick a lower Quality or FSR 1. With DLSS 5 on a 60 fps game there is
+  little GPU time left for it.
+- **G-SYNC stays**, as it runs outside the GPU's video engine.
+- **It is a download of NVIDIA's**, the same one as NVIDIA Video Frame
+  Generation: Glasir's window offers it ("Download it") and shows NVIDIA's
+  licences first. Until it is there, FSR 1 scales.
+- **Scale to** (below) works with it as with the other scalings: NVIDIA's
+  model makes the picture that size, and Glasir takes it to the screen from
+  there. It makes the picture up to four times larger.
+- It needs an NVIDIA RTX GPU and ReShade (it is Glasir's add-on in mpv that
+  runs it), and works in SDR and HDR.
+
+**Scale to** (beside Scaling; `[video] scale_to`) is the size the picture is
+scaled up to:
+
+- **Screen** (the default): the picture's place on your screen.
+- **1440p, 4K or 5K**, whatever your screen's size. Larger than the screen
+  (4K on a 1440p screen), the picture is scaled up to that size and then
+  down to the screen, which smooths edges and keeps finer detail
+  (supersampling), for more GPU time. Smaller than the screen, a plain
+  scaler does the rest of the way up, for less GPU time.
+
+It makes the most difference with FSR 1 (cleaner edges, less ringing around
+text), a little with VSR, and next to none with ArtCNN and Anime4K, which
+work at twice the capture's size as it is. With NVIDIA Super Resolution
+NVIDIA's model makes the larger size, and Glasir takes it down to the
+screen. mpv's own scaling goes to the screen in one step and does not use
+it. DLSS 5 and frame generation work on the picture at
+the screen's size either way. `glasir.ini` also takes any other even height
+from 480 to 4320 lines.
+
+### NVIDIA Video Frame Generation's quality
+
+With "Made by: NVIDIA" (an RTX 40 or 50 series GPU, NVIDIA's download),
+**Quality** picks NVIDIA's model: Low, Medium (the default), High, or
+**Auto** (`[framegen] nvidia_quality = auto`). A larger model is cleaner and
+takes more GPU time.
+
+Auto picks for you: the largest model that keeps up with the game, chosen
+again while you play when the load changes, e.g. a 30 fps game after a
+60 fps one, or DLSS 5 switched on. The menu shows which it is using
+("Auto: High"). What to expect from it:
+
+- It goes to a smaller model within about a second when frames stop keeping
+  up, and to a larger one after some seconds with time to spare.
+- The first change to a model stops the picture for a fraction of a second
+  while it loads, and frame generation picks up again about a second later.
+  After that the models stay in video memory, and changing between them
+  costs nothing. Choosing Low, Medium or High yourself frees the others.
+- With DLSS 5 on it mostly stays at Medium or below: High behind the DLSS 5
+  pass would leave uneven frames.
+- Where not even Low keeps up (DLSS 5 on a 60 fps game), frame generation
+  pauses as it does without Auto.
+
+### NVIDIA Reflex
+
+On an NVIDIA GPU, **NVIDIA Reflex** (under "More options"; "Reflex" under
+the picture's More in the menu; `[video] low_latency`) asks the driver for
+its low latency mode: Off (the default), On, or Boost (On, with the GPU kept
+at full clock speed: more power and heat).
+
+What it did on the PC Glasir is tested with, with a test picture in a
+window (not yet with a console and a card):
+
+- **Frame generation without DLSS 5**: frames reached the screen 2 to 5 ms
+  sooner, and each generated and real frame stayed on screen equally long
+  (8.3 and 8.3 ms at 120 fps, where it was 5.3 and 11.3 ms without it).
+- **DLSS 5, with or without frame generation**: no difference worth the
+  name. DLSS 5 keeps the GPU busy, and there is no waiting left to cut.
+- **Neither**: no difference.
+
+Boost did no better than On. It needs ReShade (it is Glasir's add-on in mpv
+that asks the driver) and does nothing on other GPUs.
 
 ### Screenshots
 

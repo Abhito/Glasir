@@ -106,7 +106,30 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         else if (l == L"vsr") s.scaling = Settings::Scaling::Vsr;
         else if (l == L"cnn") s.scaling = Settings::Scaling::Cnn;
         else if (l == L"anime4k") s.scaling = Settings::Scaling::Anime4k;
-        else return bad(L"mpv, fsr, vsr, cnn or anime4k");
+        else if (l == L"nvidia") s.scaling = Settings::Scaling::Nvidia;
+        else return bad(L"mpv, fsr, vsr, cnn, anime4k or nvidia");
+    } else if (name == L"video.scaling_quality") {
+        const std::wstring l = lower(value);
+        if (l == L"low") s.scaling_quality = 0;
+        else if (l == L"medium") s.scaling_quality = 1;
+        else if (l == L"high") s.scaling_quality = 2;
+        else if (l == L"ultra") s.scaling_quality = 3;
+        else return bad(L"low, medium, high or ultra");
+    } else if (name == L"video.scale_to") {
+        std::wstring l = lower(value);
+        if (l == L"screen") {
+            s.scale_to = 0;
+        } else {
+            if (!l.empty() && l.back() == L'p') l.pop_back();  // 1440p
+            if (!parse_int(l, 480, 4320, n) || n % 2) return bad(L"screen, or a height in lines: 480 to 4320, even");
+            s.scale_to = int(n);
+        }
+    } else if (name == L"video.low_latency") {
+        const std::wstring l = lower(value);
+        if (l == L"off" || l == L"0") s.low_latency = 0;
+        else if (l == L"on" || l == L"1") s.low_latency = 1;
+        else if (l == L"boost") s.low_latency = 2;
+        else return bad(L"off, on or boost");
     } else if (name == L"video.hdr_peak_nits") {
         if (!parse_int(value, 80, 10000, n)) return bad(L"80 to 10000");
         s.hdr_peak_nits = int(n);
@@ -140,7 +163,8 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
         if (l == L"low") s.nvidia_quality = 0;
         else if (l == L"medium") s.nvidia_quality = 1;
         else if (l == L"high") s.nvidia_quality = 2;
-        else return bad(L"low, medium or high");
+        else if (l == L"auto") s.nvidia_quality = 3;
+        else return bad(L"low, medium, high or auto");
     } else if (name == L"framegen.all_frames_when_off") {
         if (!parse_bool(value, b)) return bad(L"1 or 0");
         s.all_frames_when_off = b;
@@ -201,8 +225,23 @@ const wchar_t *scaling_name(Settings::Scaling scaling) {
     case Settings::Scaling::Vsr: return L"vsr";
     case Settings::Scaling::Cnn: return L"cnn";
     case Settings::Scaling::Anime4k: return L"anime4k";
+    case Settings::Scaling::Nvidia: return L"nvidia";
     default: return L"mpv";
     }
+}
+
+const wchar_t *nvidia_quality_name(int quality) {
+    return quality <= 0 ? L"low" : quality == 2 ? L"high" : quality >= 3 ? L"auto" : L"medium";
+}
+
+const wchar_t *scaling_quality_name(int quality) {
+    return quality <= 0 ? L"low" : quality == 2 ? L"high" : quality >= 3 ? L"ultra" : L"medium";
+}
+
+std::wstring scale_to_name(int scale_to) { return scale_to > 0 ? std::to_wstring(scale_to) : L"screen"; }
+
+const wchar_t *low_latency_name(int low_latency) {
+    return low_latency >= 2 ? L"boost" : low_latency == 1 ? L"on" : L"off";
 }
 
 const char *default_settings_text() {
@@ -248,8 +287,33 @@ hdr_peak_nits = 1000
 ; video super resolution: NVIDIA RTX or Intel; FSR 1 where it cannot run),
 ; cnn (ArtCNN, a small neural network: the most detail, any GPU, more GPU
 ; time) or anime4k (Anime4K: for cel-shaded and drawn styles, any GPU, more
-; GPU time).
+; GPU time). NVIDIA's vsr has quality levels (1 to 4, or Auto): they are the
+; driver's, set in the NVIDIA app (System, Video, Super resolution) for every
+; program; there is no key for them here. G-SYNC does not run while NVIDIA's
+; vsr does (the driver turns it off): pick another scaling to have G-SYNC.
+; nvidia is NVIDIA's Video Super Resolution again, but run by Glasir itself
+; (an NVIDIA RTX GPU, ReShade, and NVIDIA's download, which the window
+; offers): its models for clean pictures such as a console's, a choice among
+; them (scaling_quality), and G-SYNC stays. FSR 1 where it cannot run.
 scaling = mpv
+; scaling = nvidia: low, medium, high or ultra, NVIDIA's quality levels. A
+; higher one is a larger model and takes more GPU time, which DLSS 5 and
+; frame generation also need. The menu (Tab) switches it while playing.
+scaling_quality = medium
+; The size the scaler makes the picture: screen (the picture's place on the
+; screen), or a height in lines whatever the screen's: 1440, 2160 (4K), 2880
+; (5K). Larger than the screen, the picture is scaled up to that size and
+; then down to the screen (supersampling): smoother edges and finer detail,
+; for more GPU time. Smaller, a plain scaler does the rest of the way up.
+; Not used by scaling = mpv, which has one step only.
+scale_to = screen
+; NVIDIA GPUs: NVIDIA Reflex's low latency mode for the picture. off, on, or
+; boost (on, and the GPU is kept at full clock speed: more power, more heat).
+; With frame generation on a GPU that has time to spare, frames reach the
+; screen a few milliseconds sooner and more evenly. Where DLSS 5 keeps the
+; GPU busy, or without frame generation, it changes little. Nothing on other
+; GPUs. The menu (Tab) switches it while playing.
+low_latency = off
 
 [frames]
 ; 1: send mpv only new frames (a 30 fps game captured at 60 arrives at 30).
@@ -281,6 +345,10 @@ method = glasir
 quality = high
 ; NVIDIA's: low, medium or high. A larger model is cleaner and takes more GPU
 ; time; high is for 30 fps games with DLSS 5 off (with it on, medium).
+; auto: Glasir picks, the largest that keeps up with the game, and picks
+; again when the load changes (a 30 fps game after a 60 fps one, DLSS 5
+; switched on). The first change to a model stops the picture for a fraction
+; of a second while it loads; all three then stay in video memory.
 nvidia_quality = medium
 ; While frame generation is off (F8): 1 = send mpv every frame (lowest
 ; latency), 0 = new frames only.
@@ -317,8 +385,9 @@ mode = borderless
 ; Full screen on a screen of another shape than the picture (16:9 on an
 ; ultrawide). 0: mpv covers the screen, black bars included. 1: mpv's window
 ; takes the picture only, black around it, so DLSS 5 and frame generation skip
-; the bars. Some PCs then compose the window (no overlay plane for it) and
-; frame generation falls short of double: check the menu's fps.
+; the bars. Some PCs then compose the window (no overlay plane for it):
+; G-SYNC cannot follow it and frame generation falls short of double. The
+; menu says when (its fps, and a line under the picture's More).
 skip_black_bars = 0
 
 [launcher]

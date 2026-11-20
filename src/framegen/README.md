@@ -70,7 +70,7 @@ Settings are in `ReShade.ini`, section `[GLASIR_FRAMEGEN]`:
 | `Method` | motion | `motion` = motion-compensated, `blend` = 50/50 mix, `vfg` = NVIDIA Video Frame Generation (below; Glasir writes it while glasir.ini says `method = nvidia`). |
 | `Multiplier` | 2 | Frames shown for each of the source's: 2, 3 or 4 (glasir.ini `multiplier`; the menu's "Rate"). Where the display cannot show that many, the highest that fits. 3 and 4 are provided as is (below). |
 | `Quality` | high | `high`, or `fast`: fewer candidates per pixel, about half the drawing cost (glasir.ini). The motion method's. |
-| `VfgQuality` | medium | `Method=vfg`: NVIDIA's model, `low`, `medium` or `high` (glasir.ini `nvidia_quality`). |
+| `VfgQuality` | medium | `Method=vfg`: NVIDIA's model, `low`, `medium` or `high`, or `auto`: the add-on picks, and picks again as the load changes (below; glasir.ini `nvidia_quality`). |
 | `VfgAutoCut` | 1 | `Method=vfg`: NVIDIA's own cut detection, which shows the earlier frame again across a cut, and across some fast motion. |
 | `VfgRuntime` | (none) | `Method=vfg`: the folder with NVIDIA's DLLs. Not set: `nvidia-vfg` beside mpv.exe, where Glasir's setup puts them. |
 | `PictureOnly` | 1 | A switch (below). With black bars around the picture (a 16:9 game on a 21:9 screen), frames are generated from the picture alone; mpv says where it is. Better scenery at the picture's edges and less GPU time, but a HUD near those edges loses the bars' protection (docs/FRAMEGEN-LEARNINGS.md, 4.6): `StillHud` is for that, keep the two together. Does nothing without bars. |
@@ -79,6 +79,9 @@ Settings are in `ReShade.ini`, section `[GLASIR_FRAMEGEN]`:
 | `HistorySearch` | 0 | A switch, and a test: 1 = the motion search also starts from what each block did over the pair before (docs/FRAMEGEN-LEARNINGS.md, 4.5). Better offline on some captures, little either way on others. |
 | `DebugMarker` | 0 | Magenta square in the top-left corner of generated frames (the picture's corner with `PictureOnly`). |
 | `LogStats` | 1 | A line in `ReShade.log` every 5 s (see below). |
+| `LowLatency` | off | NVIDIA Reflex's low latency mode on mpv's device: `off`, `on` or `boost` (below; Glasir writes it from glasir.ini `[video] low_latency`, the menu switches it). |
+| `SrQuality` | medium | NVIDIA Super Resolution's model: `low`, `medium`, `high` or `ultra` (below; Glasir writes it from glasir.ini `[video] scaling_quality`, the menu switches it). Used while glasir.ini says `scaling = nvidia`. |
+| `GsyncSeen` | (none) | Written as 1 the first time the NVIDIA driver runs G-SYNC for mpv's window (G-SYNC and RTX Video Super Resolution, below). Not there until then. |
 | `MpvPipe` | glasir | mpv IPC pipe for the OSD message. |
 
 The four switches are not in `ReShade.ini` unless one differs from its
@@ -167,7 +170,8 @@ Video Effects SDK: glasir.ini `[framegen] method = nvidia`, Glasir's window
 this add-on's own generator does.
 
 - **Where it runs.** An RTX 40 or 50 series GPU, with NVIDIA's DLLs in
-  `engine\nvidia-vfg` (five files, about 200 MB). Glasir's window offers their
+  `engine\nvidia-vfg` (five files of the seven there, about 200 MB; the
+  other two are NVIDIA Super Resolution's, below). Glasir's window offers their
   download after showing NVIDIA's licences; `Glasir.exe --setup --components
   vfg --no-dialogs --accept-nvidia-licence` does it without a window. Nothing
   of NVIDIA's is in this repository or in Glasir's zip.
@@ -193,6 +197,41 @@ this add-on's own generator does.
   model is cleaner and takes more GPU time; high is for 30 fps games with
   DLSS 5 off (the menu and the launcher say to take medium with it on).
   Changing it in the menu loads the other model at the next frame.
+- **`VfgQuality=auto`.** The filter has nothing of the kind (its `Mode` stays
+  what it is set to), so the add-on picks: the largest model that keeps up,
+  from medium, chosen again as the load changes (`fg_vfg_auto.h`, arithmetic
+  only, with `tests/test_vfg_auto.cpp`).
+  - *What it goes by,* once for each real frame: how long the pair took from
+    its real frame's arrival at Glasir until its frames in between were
+    drawn (the filter's call returns when it is done, so this is the time
+    mpv's thread and the GPU were busy with it, the DLSS 5 pass included),
+    against the source's interval; and whether a frame in between was left
+    out because presents were still queued.
+  - *Down:* after some frames nearly in a row that went over the interval or
+    were left out, when the time lately is nearly all of the interval, and at
+    once when mpv drops new frames while generating - a smaller model before
+    fewer frames (3x, 4x) and before a pause. One long frame (DLSS 5
+    starting, a shader being compiled) changes nothing.
+  - *Up:* after some seconds without any of that, by what the larger model
+    took here before when it has run, else only with most of the interval
+    free: trying one that does not fit costs a moment of uneven frames. One
+    that failed right after it was taken is left alone for a while, longer
+    each time, unless the source has slowed down since. With DLSS 5 on that
+    mostly keeps it at medium or below, which is what the menu advises
+    anyway.
+  - *What is learned* is for one picture size and for DLSS 5 on or off, and
+    is forgotten after a quarter of an hour.
+  - *The models stay loaded* once made (`Vfg::use`: a filter each on the
+    same buffers), so only the first change to one stops mpv's thread while
+    it loads (mpv drops frames across that stop, and the add-on waits its
+    usual second before it generates again); each holds video memory.
+    Choosing a model in the menu lets the others go.
+  - ReShade.log has a line for each change, "VfgQuality=auto: high now
+    (there is time to spare)", with the reason in words: no timings, as
+    below. `GLASIR_VFG_PROFILE=1` adds them for the developer.
+  - Tried with a test pattern whose rate of new frames went from 30 to 60
+    and back, with DLSS 5 off and on, in a window; not yet with a card and a
+    console, in full screen, or at 3x and 4x.
 - **Cuts.** `VfgAutoCut=1` is the filter's own detection: across a cut it
   shows the earlier frame again, as the motion method does. It also does so
   across some fast motion; with 0 it draws across real cuts.
@@ -206,6 +245,218 @@ this add-on's own generator does.
   permission. Scores and timings of this method stay out of the repository,
   its issues and bug reports; with it on, the stats line leaves out how long
   the frame in between took.
+
+## NVIDIA Reflex (`LowLatency`)
+
+`LowLatency=on` asks an NVIDIA GPU's driver for Reflex's low latency mode on
+mpv's device; `boost` also for the GPU to be kept at full clock speed. It is
+this add-on that asks because it is the code in mpv's process, on the thread
+of mpv's presents (`LowLatency` in glasir_framegen.cpp;
+`src/common/nv_low_latency.h` has the calls). Off by default; with frame
+generation off it works the same way, as long as ReShade is installed.
+
+- The calls are NVAPI's (`NvAPI_D3D_SetSleepMode`, `NvAPI_D3D_Sleep`,
+  `NvAPI_D3D_SetLatencyMarker`, `NvAPI_D3D_GetLatency`,
+  `NvAPI_D3D_GetSleepStatus`), found by their numbers in the driver's own
+  `nvapi64.dll` (System32). Nothing of NVIDIA's is built in or shipped; the
+  numbers and structures are from NVIDIA's NVAPI SDK (MIT), and
+  nv_low_latency.h names the version. On another GPU the DLL is not there
+  and the menu does not offer the choice.
+- The mode is set once (and when the menu changes it). `NvAPI_D3D_Sleep` is
+  called once a frame, after mpv's present has returned and the frames this
+  add-on presents after it are queued: where mpv goes back to wait for the
+  next frame.
+- mpv's own work on a frame is done before the present the add-on sees, so
+  the frame is marked for the driver from mpv's present on: its "simulation"
+  and "render submit" start there, "present" is around the present itself.
+  The driver is not asked to use the markers (`bUseMarkersToOptimize` is 0);
+  they are what its timings in the log are counted from.
+
+`ReShade.log`, every 5 s while it is on (`LogStats`):
+
+```
+NVIDIA Reflex on: the driver says low latency mode is on, G-SYNC on, flipped straight
+to the screen | it waited 0.002 ms avg, 0.005 max after each of 300 frames | a new frame
+is at mpv's present 0.71 ms after it arrives | the driver's timings of 64 frames: 1.48 ms
+in the queue, 1.74 ms on the GPU, 1.83 ms from mpv's present to drawn
+```
+
+"The driver says" is `NvAPI_D3D_GetSleepStatus` (the NVIDIA Control Panel
+can overrule a request); G-SYNC and whether mpv's frames are flipped
+straight to the screen or composed by Windows are from the same answer, and
+only right while mpv's window is in front. A change of G-SYNC is also
+logged on its own, whatever the mode: `G-SYNC on for mpv's window`. "It waited" is how long `NvAPI_D3D_Sleep` kept
+mpv's thread. The driver's timings are left out while NVIDIA's software
+runs, and for 5 s after (Video Frame Generation or NVIDIA Super Resolution:
+its licence, above).
+`GLASIR_LATENCY_LOG=1` marks the frames and logs the same line with the mode
+off, to compare.
+
+Measured 11-19 (RTX 5070 Ti, 165 Hz G-SYNC screen; a 1080p60 test pattern
+paced by `raw_pace` into `Glasir.exe --input-raw`, a 2503x1408 window;
+PresentMon, each line the mean of about 1200 frames; "card to screen" is
+from the frame's arrival at Glasir, "after mpv's present" leaves out the
+0.7-0.9 ms before it). No capture card, console or full screen in it.
+
+| 60 → 120, Glasir's own generator, DLSS 5 off | off | on |
+| --- | --- | --- |
+| VRR (window in front): generated / real frame on screen after mpv's present | 3.9 / 15.2 ms | 2.1 / 10.4 ms |
+| VRR: how long each stays on screen, generated / real | 5.3 / 11.3 ms | 8.3 / 8.3 ms |
+| Fixed refresh (window not in front): card to screen, generated / real | 8.2 / 18.9 ms | 5.7 / 14.3 ms |
+| "done ... after the add-on drew it" in the stats line | 6.4 ms | 1.8 ms |
+
+With the mode off and little for the GPU to do, the signal that the frame in
+between is done reached the add-on some 4.6 ms after the frame was already
+on screen, and the real frame is timed from that signal: it came late, and
+the pair was uneven. With the mode on the signal comes at once. Two runs of
+each in turn gave the same; `boost` gave what `on` gives.
+
+| | off | on |
+| --- | --- | --- |
+| DLSS 5 and frame generation (the GPU busy 14.6 of every 16.7 ms), fixed refresh: card to screen, generated / real | 17.1 / 23.1, 16.6 / 22.5 ms | 17.4 / 23.4, 17.2 / 23.3 ms |
+| the same with VRR, after mpv's present | 13.1 / 18.6 ms | 13.7 / 19.2 ms |
+| DLSS 5 alone: card to screen, VRR; fixed refresh | 13.0; 15.7 ms | 13.0; 15.6, 15.4 ms |
+| Neither: card to screen, VRR | 1.75 ms | 1.77 ms |
+
+Where DLSS 5 fills the GPU there is nothing for the mode to shorten, and the
+driver's wait (0.7 ms a frame there) costs about what it saves; without
+frame generation nothing changes. The generated frame rate was the same
+either way in every pair.
+
+The driver's wait is next to nothing with VRR, and with a steady source on
+a fixed refresh (0.002 ms). On a fixed refresh it waits for the next refresh
+when two frames come within one (up to 6 ms at 165 Hz): with ffmpeg's `-re`,
+which sends frames in bursts, that was 0.3 to 2.9 ms a frame on average. A
+card sends them evenly. Not tried: a 60 fps console on a 60 Hz screen
+without VRR, where the two rates nearly match.
+
+## NVIDIA Super Resolution (`SrQuality`)
+
+glasir.ini `[video] scaling = nvidia`: the capture is made as large as its
+place in the window by NVIDIA's Video Super Resolution, the "VideoSuperRes"
+effect of the same Video Effects SDK, run by this add-on. It is in this
+add-on, and not a scaler of mpv's like the others, because the add-on is the
+code in mpv's process that has mpv's Direct3D device, and already runs the
+SDK for `Method=vfg`.
+
+- **Why beside `scaling = vsr`.** That one is the same family of models in
+  the GPU's video processor (mpv's `d3d11vpp` filter): the filter can only
+  switch it on, its level is the driver's setting for every program, and
+  the driver runs no G-SYNC on a device it works on (next section). Through
+  the SDK the model is this program's choice, the "high-bitrate" models for
+  a clean picture are there (the driver's are for compressed video), and
+  the work is CUDA's, outside the video processor: G-SYNC stays.
+- **Where it runs.** An NVIDIA RTX GPU (20 series or later), with
+  `nvVFXVideoSuperRes.dll` and `nvngx_vsr.dll` beside the SDK's own DLLs in
+  `engine\nvidia-vfg` (about 60 MB of that folder's 260). They are in the
+  package setup downloads for `Method=vfg`, after NVIDIA's licences are
+  accepted; an install made before 2026-11-19 lacks the two, and Glasir's
+  window offers the download again (`nvidia_sr_installed`). Nothing of
+  NVIDIA's is in this repository or in Glasir's zip.
+- **Where it does not.** FSR 1 scales in mpv, and ReShade.log says why
+  ("NVIDIA Video Super Resolution cannot scale the picture (...)"): not
+  downloaded, another GPU, a picture format the effect does not take
+  (scRGB), or a failure while drawing (then for that size: another size
+  tries again).
+  Without ReShade nothing answers the script, and FSR 1 stays.
+- **How (`Upscale` in glasir_framegen.cpp, `fg_sr.h`, `glasir_scaling.lua`).**
+  mpv cannot be given a picture back, so it is asked to draw the capture as
+  large as it comes, in the middle of the window (`video-unscaled`), and
+  says when it does (`user-data/glasir/sr`). At mpv's present, before
+  ReShade's effects, the add-on copies that part of the back buffer, runs
+  the effect on it (packed into a Direct3D 11 buffer that CUDA maps, as
+  `fg_vfg.h` does; `fg_nvfx.h` is what the two share) and draws the result
+  over the middle, as large as fits the window. DLSS 5, the frame in
+  between, the menu and a screenshot
+  then find a picture as large as mpv would have made it, and are told
+  where it is (`overlay::set_scaled_picture`: mpv's own word for the
+  picture's place is the small one).
+- **The script waits for the add-on's word.** The add-on makes the effect
+  (loads its model) while FSR 1 still scales, from the picture's size as mpv
+  reports it, and only then says `script-message glasir-sr ready`; where it
+  cannot, `unavailable`. So a PC where it cannot run never shows a small
+  picture. A failure (a format the effect does not take, a texture or the
+  effect that could not be made, a draw that failed, or mpv's picture not
+  where it was expected for two seconds) is for those sizes and that
+  format: another size tries again. Only mpv's own swap chain is looked at. `video-unscaled`
+  is set first and `user-data/glasir/sr` 0.15 s later (the other way round
+  when leaving), so the add-on does not take a scaled frame for a small one.
+- **Its model.** `SrQuality` low, medium (the default), high or ultra: the
+  effect's `QualityLevel` 16 to 19. A change in the menu is taken at the
+  next frame without loading anything. A larger model takes more GPU time,
+  and the effect's call returns when the picture is done: mpv's thread
+  waits for it, as with `Method=vfg`.
+- **A window being resized** keeps the effect and gives it buffers of the
+  new size; the model is loaded once per device and bit depth (some
+  seconds, at the first frame).
+- **HDR.** A 10-bit back buffer goes through as R10 G10 B10 A2, PQ as it is
+  (`ImageEncodingMode` 1, which has to be set before the images).
+- **"Scale to"** (`user-data/glasir/target`) is the size the effect makes
+  the picture, whatever the window's: its picture then goes into a texture
+  of that size, and a pass of the add-on's own takes it to its place
+  (`fg_resample.h`, `resample.hlsl`) - down from a larger one
+  (supersampling), up from a smaller one, and the rest of the way where the
+  place is more than the four times the effect goes to. Made smaller, every
+  source pixel under an output pixel counts, weighted by a Hermite curve
+  (mpv's own default for scaling down, which the other scalers' pictures go
+  through); made larger, Catmull-Rom. The values are averaged as they are,
+  not as light. mpv has no part in it, so the script only
+  makes sure the unscaled picture fits the window whole (a larger one mpv
+  would cut off: FSR 1 then). `sr_eval --resample WxH` runs the pass alone,
+  to check it against the same sums written out in full.
+- **Testing.** `python tools\scaling_check.py --nvidia [--target 2160]` (it
+  passes with FSR 1 standing in too, and says which; with a target it
+  prints the sizes the add-on logged). Offline: `sr_eval.exe` runs
+  `fg_sr.h` on raw pixels, and `eval\sr_eval.py --exe sr_eval.exe` checks
+  that it gives the bytes the SDK gives on its own (`--device` picks the
+  CUDA device on a PC with two GPUs).
+- **Tried** with a test pattern in a window, SDR and HDR, with and without
+  frame generation and DLSS 5; not yet with a card and a console.
+- **No results in public**, as for `Method=vfg`: no scores or timings of it
+  in the repository, its issues and bug reports, and the add-on logs none.
+
+## G-SYNC and RTX Video Super Resolution
+
+Found 11-19 (RTX 5070 Ti, driver 621.1, PresentMon and the driver's own
+word through `NvAPI_D3D_GetSleepStatus`), in full screen, borderless and a
+window:
+
+- **While NVIDIA's super resolution runs on mpv's Direct3D device
+  (`video.scaling = vsr`), the driver does not run G-SYNC for it**, and
+  leaves it off on that device after the filter is gone. Another mpv filter
+  keeps G-SYNC, and so does the GPU's video processor without super
+  resolution. Leaving full screen and coming back does not bring it back,
+  nor does telling the driver "off" on a video processor of that device. A
+  new device has G-SYNC again.
+- **So leaving VSR makes mpv's output anew** (`glasir_scaling.lua`: a change
+  of `d3d11-warp`, auto and no being the same with a GPU, is what makes mpv
+  build its device, swap chain and window again): about a second where
+  ReShade has its effects for that size already, as long as their compile
+  where not. Only where G-SYNC is known to run: this add-on asks the driver
+  once a second, keeps the first yes in `GsyncSeen`, and tells mpv
+  (`user-data/glasir/gsync`). Without that (another GPU, a screen without
+  G-SYNC, no ReShade) nothing is made anew.
+- **What a new output takes with it, and what was done about each:**
+  - mpv's window is a new one. Windows gives the foreground to another
+    program when the old one goes, and G-SYNC follows the window in front:
+    as the swap chain goes, mpv's process gives itself leave to take the
+    foreground back (`keep_foreground`), and mpv's new window then comes up
+    in front. Glasir finds the new window (backdrop.cpp) and puts a
+    borderless one back in its place; the script has mpv make it the size of
+    the old one;
+  - ReShade unloads and loads the other add-ons; this one stays loaded and
+    is registered again. Its menu was never let go with the swap chain
+    (only with the device, by which time the add-on no longer knew it as
+    mpv's): after a new output the menu and the toasts were dead. They are
+    let go with the swap chain now, and a menu that was open opens again
+    (mpv keeps that in `user-data/glasir/menu`);
+  - DLSS 5 stays engaged and frame generation goes on (tried in a window).
+- **For the menu:** its top line ends in `G-SYNC` while the driver runs it,
+  and a borderless window that Windows composes (the black bars skipped,
+  without an overlay plane: seen both ways on one evening) gets a line
+  saying so.
+- Not tried: a console through the card, an RTX 30 or 40, Intel's super
+  resolution (nothing is made anew for it).
 
 ## When it generates
 

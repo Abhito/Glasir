@@ -16,6 +16,11 @@ frame generation is working. Under "Frame generation" it says why it is not:
   happening). DLSS 5 and frame generation share the GPU; at 60 → 120 fps each
   frame has about 8 ms. Choose **Fast** quality, use a lighter DLSS 5 setting,
   or capture at a lower resolution. Close other programs that use the GPU.
+- **With "Made by: NVIDIA", Quality: Auto keeps changing**: it picks the
+  largest of NVIDIA's models that keeps up, and picks again when the load
+  changes. A change now and then is what it is for; `engine\ReShade.log` has
+  a line for each ("VfgQuality=auto: ... now", with why). If the short stop
+  at a change bothers you, choose Low, Medium or High yourself.
 - **"Not doubling: the display shows at most N Hz"**: twice the game's rate
   would be more than the screen can show (60 fps needs a 120 Hz screen).
 - The checkbox is greyed out: the card is used through DirectShow (cards
@@ -38,7 +43,17 @@ tests.
   plane (MPO), which other running apps can take away; it is then composed
   by Windows, a frame later, and frame generation reaches only about 100 of
   120 fps. If the menu shows less than double, turn "Skip the black bars"
-  off.
+  off. With an NVIDIA GPU the menu says so itself, under the picture's More:
+  "Windows is composing this window".
+- **Is it on?** With an NVIDIA GPU, the menu's top line ends in `G-SYNC`
+  while the driver runs it for Glasir's window.
+- **NVIDIA's video super resolution (Scaling: VSR) and G-SYNC do not run
+  together.** The NVIDIA driver turns G-SYNC off for a program while RTX
+  Video Super Resolution works in it. Pick another scaling (FSR 1, ArtCNN,
+  or NVIDIA Super Resolution, which is NVIDIA's again but run by Glasir)
+  to have G-SYNC. When you switch away from VSR in the menu, Glasir starts
+  the picture again (a second or two without it) because the driver would
+  otherwise keep G-SYNC off until Glasir is closed.
 
 ## Black bars on an ultrawide screen
 
@@ -92,7 +107,34 @@ and cleans up compression too; **ArtCNN** rebuilds the most detail on any
 GPU; **Anime4K** suits drawn and cel-shaded games. VSR, ArtCNN and Anime4K
 cost GPU time, which DLSS 5 and frame generation also need; if frame
 generation starts pausing, go back to FSR 1. If VSR cannot run (the driver
-turns it down), Glasir says so and uses FSR 1.
+turns it down), Glasir says so and uses FSR 1. How strong NVIDIA's VSR is
+(1 to 4, or Auto) is set in the NVIDIA app, under System, Video, Super
+resolution, not in Glasir.
+
+**NVIDIA Super Resolution** (NVIDIA RTX) is NVIDIA's super resolution run
+by Glasir itself: its "Quality" (Low to Ultra) is picked in Glasir, and
+G-SYNC stays on with it. It is a download of NVIDIA's, which Glasir's
+window offers under Scaling.
+
+- **The menu says it cannot run here**, or the top line says FSR 1: it is
+  not downloaded (Glasir's window, Scaling, "Download it"), ReShade is not
+  installed, or the GPU is not an NVIDIA RTX. `engine\ReShade.log` has a
+  line saying which ("NVIDIA Video Super Resolution cannot scale the
+  picture"). FSR 1 scales meanwhile.
+- **Frame generation shows less than double with it, or pauses**: its
+  models take GPU time. Pick a lower Quality, or FSR 1. With DLSS 5 on a
+  60 fps game the GPU has little time left for it; a 30 fps game leaves
+  more.
+- **The picture stops for a moment** when it is switched on: Glasir's
+  add-on loads NVIDIA's model (FSR 1 scales meanwhile), and does so again
+  for another picture size or bit depth.
+
+"Scale to" beside it picks the size the picture is scaled up to. A size
+larger than your screen (4K on a 1440p screen) is scaled down to the screen
+afterwards, which smooths edges: it helps FSR 1 the most, VSR a little, and
+ArtCNN and Anime4K hardly at all. It costs GPU time too; "Screen" is the
+lightest. mpv's own scaling does not use it. With NVIDIA Super Resolution
+it is NVIDIA's model that makes the larger size.
 
 ## The capture card does not open
 

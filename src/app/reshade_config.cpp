@@ -147,8 +147,14 @@ void write_reshade_config(const std::wstring &engine_dir, const Settings &s, boo
         put(ini, L"GLASIR_FRAMEGEN", L"Method", L"vfg");
     else if (get(ini, L"GLASIR_FRAMEGEN", L"Method") == L"vfg")
         put(ini, L"GLASIR_FRAMEGEN", L"Method", L"motion");
-    put(ini, L"GLASIR_FRAMEGEN", L"VfgQuality", s.nvidia_quality == 0 ? L"low" : s.nvidia_quality == 2 ? L"high" : L"medium");
+    put(ini, L"GLASIR_FRAMEGEN", L"VfgQuality", nvidia_quality_name(s.nvidia_quality));
     put(ini, L"GLASIR_FRAMEGEN", L"DedupWhenOff", s.all_frames_when_off ? L"0" : L"1");
+    // NVIDIA Reflex's low latency mode, which the add-on asks the driver for
+    // (it is the one in mpv's process, on mpv's device).
+    put(ini, L"GLASIR_FRAMEGEN", L"LowLatency", low_latency_name(s.low_latency));
+    // The model of NVIDIA's Video Super Resolution (video.scaling = nvidia:
+    // the add-on scales the picture, glasir_scaling.lua says when).
+    put(ini, L"GLASIR_FRAMEGEN", L"SrQuality", scaling_quality_name(s.scaling_quality));
     put(ini, L"GLASIR_FRAMEGEN", L"MpvPipe", L"glasir");
 
     if (!dlss5_installed(engine_dir)) return;

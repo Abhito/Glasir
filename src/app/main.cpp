@@ -33,9 +33,11 @@
 // does the same when mpv or ReShade is missing. What is downloaded is the
 // version of each this Glasir was tested with (components.h); --newest takes
 // the newest instead, to try before it is made the tested one.
-// vfg is NVIDIA Video Frame Generation: never downloaded unasked. The window
-// offers it and shows NVIDIA's licences first; --no-dialogs takes it only with
-// --accept-nvidia-licence, which says the user has read and accepts them.
+// vfg is NVIDIA Video Frame Generation, with NVIDIA's Video Super Resolution
+// (video.scaling = nvidia) in the same package: never downloaded unasked. The
+// window offers it and shows NVIDIA's licences first; --no-dialogs takes it
+// only with --accept-nvidia-licence, which says the user has read and accepts
+// them.
 //
 // --update installs the newest Glasir from its GitHub releases if it is
 // newer (update.h); --update-from installs a release zip from disk. The
@@ -656,7 +658,7 @@ SetupResult setup(const Args &args, const std::wstring &dir, const std::wstring 
             else if (name == L"dlss5") which.push_back(Component::Dlss5);
             else if (name == L"vfg") {
                 if (!args.accept_nvidia) {
-                    report(L"vfg is NVIDIA Video Frame Generation, under NVIDIA's licences (the NVIDIA Software License "
+                    report(L"vfg is NVIDIA Video Frame Generation and Video Super Resolution, under NVIDIA's licences (the NVIDIA Software License "
                            L"Agreement, the Product-Specific Terms for NVIDIA AI Products and the NVIDIA Open Model "
                            L"License, on nvidia.com/en-us/agreements). Add --accept-nvidia-licence if you accept them.");
                     return SetupResult::Failed;
@@ -988,6 +990,8 @@ int run(const Args &args, bool again, bool &stuck, bool &restart) {
     changes.on_message = [&reports, &backdrop, &asked_mode, &asked_rtx](const std::vector<std::string> &words) {
         if (words.front() == "glasir-window" && words.size() > 1 && words[1] == "again")
             backdrop.place_again();  // mpv left its own full screen (glasir_window.lua)
+        else if (words.front() == "glasir-window" && words.size() > 1 && words[1] == "rebuilt")
+            backdrop.window_rebuilt();  // mpv made its output anew, its window with it (glasir_scaling.lua)
         else if (words.front() == "glasir-window" && words.size() > 1)
             backdrop.set_borderless(words[1] == "borderless");
         else if (words.front() == "glasir-picture" && words.size() > 1)
@@ -1324,18 +1328,19 @@ void show_in_explorer(const std::wstring &file) {
     ShellExecuteW(nullptr, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
-// The launcher's download of NVIDIA Video Frame Generation: NVIDIA's licences
-// first, and nothing is downloaded unless they are accepted.
+// The launcher's download of NVIDIA Video Frame Generation and Video Super
+// Resolution (one package): NVIDIA's licences first, and nothing is downloaded
+// unless they are accepted.
 void setup_vfg(const std::wstring &engine) {
     if (!ask_vfg_licence()) {
-        log(L"setup: NVIDIA Video Frame Generation: its licences were not accepted");
+        log(L"setup: NVIDIA Video Frame Generation and Super Resolution: the licences were not accepted");
         return;
     }
-    log(L"setup: NVIDIA Video Frame Generation: its licences were accepted in the window");
+    log(L"setup: NVIDIA Video Frame Generation and Super Resolution: the licences were accepted in the window");
     std::wstring error;
     if (!run_setup(engine, {Component::Vfg}, Versions::Tested, true, error) && error != L"cancelled")
-        show(L"Glasir could not download NVIDIA Video Frame Generation: " + sentence(error) +
-                 L"\n\nGlasir's own frame generation is used until then. logs\\glasir.log has the details.",
+        show(L"Glasir could not download NVIDIA's frame generation and super resolution: " + sentence(error) +
+                 L"\n\nGlasir's own frame generation and FSR 1 are used until then. logs\\glasir.log has the details.",
              MB_ICONERROR);
 }
 

@@ -96,7 +96,7 @@ struct Choice {
     bool framegen = true;
     bool fast = false;
     bool nvidia = false;     // NVIDIA Video Frame Generation makes the frames in between
-    int nvidia_quality = 1;  // 0 low, 1 medium, 2 high
+    int nvidia_quality = 1;  // 0 low, 1 medium, 2 high, 3 auto
     int multiplier = 2;      // frames shown for each of the game's: 2, 3 or 4
     bool audio = true;
     std::wstring audio_device;
@@ -105,6 +105,9 @@ struct Choice {
     bool skip_bars = false;
     bool show = true;
     Settings::Scaling scaling = Settings::Scaling::Mpv;
+    int scaling_quality = 1;  // scaling = nvidia: its model, 0 low .. 3 ultra
+    int scale_to = 0;         // the height the scaler makes the picture; 0: its place on the screen
+    int low_latency = 0;      // NVIDIA Reflex's low latency mode: 0 off, 1 on, 2 on with boost
     UINT32 shown_height = 0;  // the mode the window shows (automatic resolved), for the scaling note
 };
 
@@ -327,12 +330,32 @@ struct BugReport {
 // FSR 1 - once the GPU is known (the first frames are drawn before it is
 // found). On every frame, whether the scaling line is shown or not.
 void keep_scaling_possible(Choice &c, const Found *f) {
-    if (c.scaling == Settings::Scaling::Vsr && f && f->gpu.found && std::wstring(vsr_kind(f->gpu)) == L"none")
-        c.scaling = Settings::Scaling::Fsr;
+    if (!f || !f->gpu.found) return;
+    const std::wstring vsr = vsr_kind(f->gpu);
+    if (c.scaling == Settings::Scaling::Vsr && vsr == L"none") c.scaling = Settings::Scaling::Fsr;
+    if (c.scaling == Settings::Scaling::Nvidia && vsr != L"nvidia") c.scaling = Settings::Scaling::Fsr;  // NVIDIA RTX only
 }
 
-// How a capture smaller than the screen is scaled up.
-void scaling_row(Choice &c, const Found *f) {
+// Where NVIDIA keeps the settings a program cannot set for itself (RTX Video
+// Super Resolution's quality): the NVIDIA app, or else the NVIDIA Control
+// Panel (a Store app, opened by its name in the shell's Apps folder).
+void open_nvidia_settings() {
+    wchar_t programs[MAX_PATH] = {};
+    GetEnvironmentVariableW(L"ProgramW6432", programs, MAX_PATH);
+    const std::wstring app = std::wstring(programs) + L"\\NVIDIA Corporation\\NVIDIA app\\CEF\\NVIDIA App.exe";
+    if (GetFileAttributesW(app.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        ShellExecuteW(nullptr, L"open", app.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return;
+    }
+    ShellExecuteW(nullptr, L"open",
+                  L"shell:AppsFolder\\NVIDIACorp.NVIDIAControlPanel_56jybvy8sckqj!NVIDIACorp.NVIDIAControlPanel", nullptr,
+                  nullptr, SW_SHOWNORMAL);
+}
+
+// How a capture smaller than the screen is scaled up. sr_installed: NVIDIA's
+// Video Super Resolution is downloaded. True when its download was asked for.
+bool scaling_row(Choice &c, const Found *f, bool sr_installed) {
+    bool download = false;
     const std::wstring vsr = f ? vsr_kind(f->gpu) : L"none";
     const char *vsr_label = vsr == L"intel" ? "Intel Video Super Resolution" : "NVIDIA RTX Video Super Resolution";
     struct Option {
@@ -343,6 +366,7 @@ void scaling_row(Choice &c, const Found *f) {
         {Settings::Scaling::Mpv, "mpv (Lanczos)"},
         {Settings::Scaling::Fsr, "AMD FSR 1 (sharper)"},
         {Settings::Scaling::Vsr, vsr_label},
+        {Settings::Scaling::Nvidia, "NVIDIA Super Resolution (quality levels, keeps G-SYNC)"},
         {Settings::Scaling::Cnn, "ArtCNN (neural, the most detail)"},
         {Settings::Scaling::Anime4k, "Anime4K (cel-shaded and drawn styles)"},
     };
@@ -352,7 +376,8 @@ void scaling_row(Choice &c, const Found *f) {
         if (o.value == c.scaling) current = o.label;
     if (ui::begin_combo("##scaling", current)) {
         for (const Option &o : options) {
-            const bool off = o.value == Settings::Scaling::Vsr && vsr == L"none";
+            const bool off = (o.value == Settings::Scaling::Vsr && vsr == L"none") ||
+                             (o.value == Settings::Scaling::Nvidia && vsr != L"nvidia");
             if (off) ImGui::BeginDisabled();
             if (ImGui::Selectable(o.label, o.value == c.scaling)) c.scaling = o.value;
             if (off) ImGui::EndDisabled();
@@ -361,11 +386,55 @@ void scaling_row(Choice &c, const Found *f) {
     }
     ui::tooltip("How a capture smaller than the screen is scaled up, before DLSS 5. Video super resolution uses the "
                 "GPU's video engine (FSR 1 where it cannot run); ArtCNN and Anime4K take more GPU time, which DLSS 5 "
-                "and frame generation also need.");
-    // A capture as tall as its place on the screen is not scaled at all.
+                "and frame generation also need.\nNVIDIA Super Resolution (an RTX GPU) is NVIDIA's again, run by "
+                "Glasir itself: with its models for clean pictures such as a console's, a choice among them, and "
+                "G-SYNC.");
+    // NVIDIA's has quality levels, and they are the driver's: a program can
+    // only ask for the super resolution, not say how strong (mpv's filter,
+    // like every program's, passes "on"). So: where to set it.
+    if (c.scaling == Settings::Scaling::Vsr && vsr == L"nvidia") {
+        dim("Its quality (1 to 4, or Auto) is set in the NVIDIA app, for every program: System, Video, Super "
+            "resolution. Glasir cannot set it. G-SYNC does not run while it does (the driver's doing).");
+        if (ImGui::SmallButton("Open the NVIDIA app")) open_nvidia_settings();
+    }
+    // Glasir's own run of NVIDIA's super resolution: its model is chosen here.
+    if (c.scaling == Settings::Scaling::Nvidia) {
+        ImGui::PushID("scaling");
+        const int q = ui::choice("Quality", {"Low", "Medium", "High", "Ultra"}, c.scaling_quality, column(),
+                                 "NVIDIA's quality level. A higher one is a larger model and takes more GPU time, which DLSS 5 "
+                                 "and frame generation also need: Low or Medium beside them, High or Ultra without.");
+        ImGui::PopID();
+        if (q >= 0) c.scaling_quality = q;
+        if (!sr_installed) {
+            dim("NVIDIA's Video Super Resolution is not downloaded yet (NVIDIA's package, about 440 MB). Until it is, "
+                "FSR 1 scales.");
+            ImGui::PushID("scaling");
+            if (ImGui::Button("Download it")) download = true;
+            ImGui::PopID();
+        }
+    }
+    // The size it scales to: the picture's place on the screen, or a size of
+    // its own, from which mpv's scaler goes to the screen (Glasir's add-on,
+    // for NVIDIA Super Resolution).
+    static constexpr int kLines[] = {0, 1440, 2160, 2880};
+    int at = -1;  // a height from glasir.ini that is none of these: none is lit
+    for (int i = 0; i < 4; ++i)
+        if (kLines[i] == c.scale_to) at = i;
+    const int to = ui::choice(
+        "Scale to", {"Screen", "1440p", "4K", "5K"}, at, column(),
+        "The size the picture is scaled up to. Screen: its place on the screen.\nA size larger than the screen (4K on "
+        "a 1440p screen) is scaled down to the screen afterwards: smoother edges and finer detail, for more GPU "
+        "time.\nA smaller one leaves the rest of the way up to a plain scaler, for less GPU time.");
+    if (to >= 0) c.scale_to = kLines[to];
+    // A capture as tall as what it is scaled to is not scaled at all.
     const int screen_w = GetSystemMetrics(SM_CXSCREEN), screen_h = GetSystemMetrics(SM_CYSCREEN);
-    const UINT32 place_h = UINT32(std::min(screen_h, screen_w * 9 / 16));
-    if (c.shown_height && c.shown_height >= place_h) dim("Not used: the capture is as large as its place on the screen.");
+    const UINT32 place_h = c.scale_to ? UINT32(c.scale_to) : UINT32(std::min(screen_h, screen_w * 9 / 16));
+    if (c.scale_to && c.scaling == Settings::Scaling::Mpv)
+        dim("mpv's own scaling goes straight to the screen: pick another Scaling to scale to this size.");
+    else if (c.shown_height && c.shown_height >= place_h)
+        dim(c.scale_to ? "Not used: the capture is as large as this size."
+                       : "Not used: the capture is as large as its place on the screen.");
+    return download;
 }
 
 struct Screen {
@@ -375,6 +444,7 @@ struct Screen {
     bool dlss5_installed = false;
     bool dlss5_forced = false;  // glasir.ini: [dlss5] enabled = on (try on any GPU)
     bool vfg_installed = false;  // NVIDIA Video Frame Generation is downloaded
+    bool sr_installed = false;   // and NVIDIA's Video Super Resolution (the same download)
     std::string versions;  // "mpv 20261031  ·  ReShade 6.8.0  ·  DLSS 5 10.8.0", "" if none
     bool other_versions = false;  // not the ones this Glasir was tested with: Update installs those
     const LauncherExtras *extras = nullptr;
@@ -546,10 +616,11 @@ void draw(Screen &s) {
             }
         } else if (nvidia_gpu && c.nvidia) {
             ImGui::PushID("nvidia");
-            const int q = ui::choice("Quality", {"Low", "Medium", "High"}, c.nvidia_quality, column(),
+            const int q = ui::choice("Quality", {"Low", "Medium", "High", "Auto"}, c.nvidia_quality, column(),
                                      "NVIDIA's model. A larger one is cleaner and takes more GPU time, which adds "
                                      "delay. High is for 30 fps games with DLSS 5 off: with DLSS 5 on, Medium "
-                                     "gives more even frames.");
+                                     "gives more even frames.\nAuto picks the largest that keeps up with the game, "
+                                     "and picks again when the load changes.");
             ImGui::PopID();
             if (q >= 0) c.nvidia_quality = q;
             if (c.nvidia_quality == 2 && dlss5) dim("With DLSS 5 on, Medium gives more even frames.");
@@ -609,13 +680,26 @@ void draw(Screen &s) {
     // What is set once: scaling, the sound, the window, the downloads, a bug report.
     if (ui::disclosure("More options", &s.more)) {
         ui::begin_card("more");
-        scaling_row(c, f);
+        if (scaling_row(c, f, s.sr_installed)) {
+            s.action = LauncherAction::SetupVfg;  // one package: frame generation and super resolution
+            s.finished = true;
+        }
         // NVIDIA RTX Video HDR, in the GPU's video processor (as its super resolution).
         if (!c.hdr_auto && c.hdr && f && std::wstring(vsr_kind(f->gpu)) == L"nvidia")
             ui::toggle("RTX HDR for SDR", &c.rtx_hdr,
                        "With Picture set to HDR: when the console sends SDR, NVIDIA RTX Video HDR turns it into HDR "
                        "and the screen stays in HDR. Glasir tells SDR from HDR by the picture. HDR must be on in "
                        "Windows. Off: everything is shown as HDR.");
+        // NVIDIA Reflex, which the frame generation add-on asks the driver for.
+        if (f && f->gpu.vendor == kVendorNvidia) {
+            const int latency = ui::choice(
+                "NVIDIA Reflex", {"Off", "On", "Boost"}, c.low_latency, column(),
+                "NVIDIA Reflex's low latency mode for the picture. With frame generation on a GPU that has time to "
+                "spare, frames reach the screen a few milliseconds sooner and more evenly. Where DLSS 5 keeps the "
+                "GPU busy, or without frame generation, it changes little.\nBoost also keeps the GPU at full clock "
+                "speed: more power and heat.");
+            if (latency >= 0) c.low_latency = latency;
+        }
         ui::divider();
         ui::toggle("Play the card's sound", &c.audio);
         if (c.audio && f) {
@@ -645,7 +729,8 @@ void draw(Screen &s) {
             ui::toggle("Skip the black bars", &c.skip_bars,
                        "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
                        "generation work on the picture only, a lighter load. On some PCs Windows then composes the "
-                       "window and frame generation falls short of double: check the fps in the menu (Tab).");
+                       "window: G-SYNC cannot follow it and frame generation falls short of double. The menu (Tab) "
+                       "says when.");
         ui::toggle("Open this window when Glasir starts", &c.show);
         if (!c.show) dim("Glasir then plays at once. Hold Shift while starting it to see this window.");
         ui::end_card();
@@ -699,7 +784,7 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool nr_gp
     if (c.multiplier != o.multiplier) v.push_back({L"framegen", L"multiplier", std::to_wstring(c.multiplier)});
     if (c.nvidia != o.nvidia) v.push_back({L"framegen", L"method", c.nvidia ? L"nvidia" : L"glasir"});
     if (c.nvidia_quality != o.nvidia_quality)
-        v.push_back({L"framegen", L"nvidia_quality", c.nvidia_quality == 0 ? L"low" : c.nvidia_quality == 2 ? L"high" : L"medium"});
+        v.push_back({L"framegen", L"nvidia_quality", nvidia_quality_name(c.nvidia_quality)});
     if (c.audio != o.audio) v.push_back({L"audio", L"enabled", c.audio ? L"1" : L"0"});
     if (c.audio_device != o.audio_device) v.push_back({L"audio", L"device", c.audio_device});
     if (c.borderless != o.borderless || c.fullscreen != o.fullscreen)
@@ -707,6 +792,10 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool nr_gp
     if (c.skip_bars != o.skip_bars) v.push_back({L"window", L"skip_black_bars", c.skip_bars ? L"1" : L"0"});
     if (c.show != o.show) v.push_back({L"launcher", L"show", c.show ? L"1" : L"0"});
     if (c.scaling != o.scaling) v.push_back({L"video", L"scaling", scaling_name(c.scaling)});
+    if (c.scaling_quality != o.scaling_quality)
+        v.push_back({L"video", L"scaling_quality", scaling_quality_name(c.scaling_quality)});
+    if (c.scale_to != o.scale_to) v.push_back({L"video", L"scale_to", scale_to_name(c.scale_to)});
+    if (c.low_latency != o.low_latency) v.push_back({L"video", L"low_latency", low_latency_name(c.low_latency)});
     if (v.empty()) return;
     save_settings(path, v);
     log(L"launcher: {} setting(s) saved to {}", v.size(), path);
@@ -752,6 +841,9 @@ Choice from(const Settings &s) {
     c.skip_bars = s.skip_black_bars;
     c.show = s.show_launcher;
     c.scaling = s.scaling;
+    c.scaling_quality = s.scaling_quality;
+    c.scale_to = s.scale_to;
+    c.low_latency = s.low_latency;
     return c;
 }
 
@@ -800,6 +892,7 @@ LauncherAction run_launcher(const std::wstring &settings_path, const std::wstrin
     screen.dlss5_installed = component_installed(engine_dir, Component::Dlss5);
     screen.dlss5_forced = settings.dlss5 == Settings::Dlss5::On;
     screen.vfg_installed = component_installed(engine_dir, Component::Vfg);
+    screen.sr_installed = nvidia_sr_installed(engine_dir);
     screen.versions = versions_line(engine_dir);
     for (Component c : {Component::Mpv, Component::ReShade, Component::Dlss5, Component::Vfg})
         screen.other_versions = screen.other_versions || (component_installed(engine_dir, c) && !component_as_tested(engine_dir, c));

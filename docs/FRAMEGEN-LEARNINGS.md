@@ -993,6 +993,50 @@ can be avoided.
   - an mpv child window (`--wid`) loses VRR.
 - **NVIDIA "Prefer maximum performance" for mpv** made 60 fps work ~2 ms
   slower per frame. Leave power at the default.
+- **NVIDIA Reflex's low latency mode** (11-19, `LowLatency`, glasir.ini
+  `[video] low_latency`; the table is in src/framegen/README.md), measured
+  with a steadily paced test pattern in a window, no card:
+  - with DLSS 5 off, 60 → 120 was *not* evenly paced without it: 5.3 and
+    11.3 ms on screen with VRR. The hold times the real frame from the
+    signal that the frame in between is done, and with little for the GPU
+    to do that signal reached the add-on 6.4 ms after the drawing, some
+    4.6 ms after the frame was already on screen. The 8.3 / 8.3 above was
+    measured with DLSS 5 on, where the GPU is busy until the frame is done;
+  - with the mode on the signal comes 1.8 ms after the drawing: 8.3 / 8.3 ms
+    on screen, the frame in between 1.8 ms and the real frame 4.8 ms sooner
+    (2.5 and 4.6 ms on a fixed refresh);
+  - with DLSS 5 on (the GPU busy 14.6 of 16.7 ms in that test) it changes
+    nothing that could be told from run to run, and nothing without frame
+    generation. Boost gave what On gives;
+  - a first single pair of runs said it took frame generation from 40-46 to
+    58-59 generated frames a second: the next four runs, in turn, gave 57-60
+    with it on and off. One pair is not a result;
+  - whether the window is in front decides VRR, and so every number: the
+    test's window was in front in some runs and not in others. Compare runs
+    of one kind (PresentMon: sync interval 0 and tearing allowed is VRR);
+  - off by default: not tried with a card, full screen, 30 fps, 3x and 4x,
+    NVIDIA's generator, or an RTX 30 or 40. Open: whether the late "done"
+    signal without it can be had sooner some other way, for other GPUs too.
+- **G-SYNC and NVIDIA's super resolution** (11-19; src/framegen/README.md
+  has the whole of it). The driver runs no G-SYNC on a device RTX VSR runs
+  on, and none after VSR is gone, until mpv has a new device: leaving VSR
+  now makes mpv's output anew. The owner's report was "G-SYNC goes when I
+  switch between VSR and FSR, and does not come back".
+- **Borderless with the bars skipped, again** (11-19): composed, and so
+  without G-SYNC, in six runs in a row, an hour after two runs in which the
+  same window was flipped straight to the screen with G-SYNC; borderless
+  over the whole screen had G-SYNC in the run before and the run after.
+  The owner had the browser open by then. Nothing new about the cause; the
+  menu now says when it happens (the driver tells).
+- **How to tell VRR in a test** (11-19): PresentMon's rows are sync
+  interval 0 with tearing allowed while G-SYNC runs and 1 / not allowed
+  when it does not (mpv always presents with interval 1: the driver's
+  doing), and the times on screen leave the 165 Hz grid. The driver's
+  `NvAPI_D3D_GetSleepStatus` says the same (the add-on logs each change).
+  Both need the window in front: a test started from a shell had it in
+  front in most runs, never for sure - look at what was in front.
+  A new picture size stops the picture for 14 s while ReShade compiles the
+  DLSS 5 feed for it, even with DLSS 5 off: run each test twice.
 
 ## 7. Dedup and the PS5's noise
 

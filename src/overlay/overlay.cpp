@@ -57,6 +57,13 @@ struct Overlay {
     // real frames frame generation presents itself.
     unsigned on_mpv = 0, on_real = 0;
     bool mpv_started = false;
+    // Whether the menu was open before this add-on was loaded has been looked
+    // at (on_reshade_present).
+    bool reopen_checked = false;
+    // The picture's place when the add-on scaled it itself (set_scaled_picture).
+    bool scaled = false;
+    D3D11_BOX scaled_box{};
+    ScalerHost scaler;
     double closed_at = -100;  // when the menu last closed (its own changes still arrive then)
     // The toast showing (render thread), and toasts from this add-on.
     std::string toast_text;
@@ -192,6 +199,7 @@ void set_open(bool open) {
     if (!open) g.closed_at = now_seconds();
     // mpv hides the cursor when the mouse rests; the menu needs it.
     g.mpv.command({"set", "cursor-autohide", open ? "no" : "100"});  // Glasir starts mpv with 100
+    g.mpv.command({"set", "user-data/glasir/menu", open ? "open" : "closed"});  // for an add-on loaded anew
     if (open) g.last.QuadPart = 0;
 }
 
@@ -305,7 +313,34 @@ D3D11_BOX picture_box(const MpvState::Osd &osd, UINT width, UINT height) {
 
 void set_host(const Host &host) { g.host = host; }
 
-D3D11_BOX picture_box(UINT width, UINT height) { return picture_box(g.mpv.state().osd, width, height); }
+D3D11_BOX mpv_picture_box(UINT width, UINT height) { return picture_box(g.mpv.state().osd, width, height); }
+
+D3D11_BOX picture_box(UINT width, UINT height) {
+    if (g.scaled && g.scaled_box.right <= width && g.scaled_box.bottom <= height) return g.scaled_box;
+    return mpv_picture_box(width, height);
+}
+
+void set_scaled_picture(const D3D11_BOX *box) {
+    g.scaled = box != nullptr;
+    if (box) g.scaled_box = *box;
+}
+
+Shown shown() {
+    Shown s;
+    if (!g.mpv_started) return s;
+    const MpvState state = g.mpv.state();
+    s.connected = state.connected;
+    s.scaling = state.scaling;
+    s.unscaled = state.sr == "on";
+    s.video_w = state.width;
+    s.video_h = state.height;
+    s.target = std::max(state.target, 0);
+    return s;
+}
+
+void set_scaler_host(const ScalerHost &host) { g.scaler = host; }
+
+const ScalerHost &scaler_host() { return g.scaler; }
 
 void toast(const std::string &text, double seconds) {
     std::lock_guard lock(g.local_m);
@@ -317,6 +352,10 @@ void toast(const std::string &text, double seconds) {
 void note_color_space(reshade::api::color_space color_space) { g.color_space = color_space; }
 
 bool menu_open() { return g.open; }
+
+bool mpv_connected() { return g.mpv_started && g.mpv.state().connected; }
+
+void mpv_command(const std::vector<std::string> &words) { g.mpv.command(words); }
 
 void before_frame_generation(reshade::api::effect_runtime *runtime) {
     reshade::api::device *api_device = runtime->get_device();
@@ -338,7 +377,7 @@ void before_frame_generation(reshade::api::effect_runtime *runtime) {
     back_buffer->GetDesc(&bb);
     std::string error;
     if (!g.shots.grab(device, g.context.Get(), back_buffer.Get(), encoding_of(g.color_space.load()),
-                      picture_box(g.mpv.state().osd, bb.Width, bb.Height), error))
+                      picture_box(bb.Width, bb.Height), error))
         shot_done(false, error);
 }
 
@@ -369,6 +408,17 @@ void on_reshade_present(reshade::api::effect_runtime *runtime) {
         return;
     }
 
+    // When mpv makes its output anew while playing (glasir_scaling.lua), the
+    // menu that was open goes with the old device (release(); ReShade may
+    // load the add-on anew as well). mpv keeps whether it was open
+    // (set_open), and it opens again here.
+    if (!g.reopen_checked) {
+        const MpvState state = g.mpv.state();
+        if (state.menu_known) {
+            g.reopen_checked = true;
+            if (state.menu == "open") set_open(true);
+        }
+    }
     if (runtime->is_key_pressed(kOpenKey) || (g.open && runtime->is_key_pressed(VK_ESCAPE))) set_open(!g.open);
     poll_toasts(now_seconds());
     if (!g.open && !toast_showing()) return;
@@ -404,7 +454,9 @@ void release() {
     g.context.Reset();
     g.device = nullptr;
     g.runtime = nullptr;
+    g.scaled = false;
     g.open = false;
+    g.reopen_checked = false;  // on the next device: was the menu open (mpv knows)?
     g.style_height = 0;
 }
 

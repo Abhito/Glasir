@@ -7,8 +7,9 @@
 //   DLSS 5     DLSS5-Feeder (jlrouzies-fr), RenoDX-DLSS5 and       engine\...
 //              nvngx_dlssnr.dll (RHI's mirror, RankFTW/rhi-repo),
 //              nvngx_dlss.dll (NVIDIA/DLSS), ReShade.fxh
-//   NVIDIA Video Frame Generation, only when the user asks for it and has
-//              accepted NVIDIA's licences: the Video Effects SDK's runtime,
+//   NVIDIA Video Frame Generation and Video Super Resolution, only when the
+//              user asks and has accepted NVIDIA's licences: the Video
+//              Effects SDK's runtime,
 //              from NVIDIA's package index (pypi.nvidia.com/nvidia-vfx)
 //                                                                  engine\nvidia-vfg
 //
@@ -37,6 +38,10 @@ enum class Component { Mpv, ReShade, Dlss5, Vfg };
 
 const wchar_t *component_name(Component c);
 bool component_installed(const std::wstring &engine_dir, Component c);
+// NVIDIA's Video Super Resolution is in engine\nvidia-vfg (video.scaling =
+// nvidia): it comes with the Vfg component, from the same package, but an
+// install made before Glasir had it lacks its two files.
+bool nvidia_sr_installed(const std::wstring &engine_dir);
 // "name version" lines from components.ini, for the log.
 std::vector<std::wstring> installed_versions(const std::wstring &engine_dir);
 
