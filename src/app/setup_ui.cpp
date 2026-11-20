@@ -127,15 +127,17 @@ std::optional<std::vector<Component>> ask_setup(const SetupChoice &choice) {
 
 bool ask_vfg_licence() {
     const std::wstring content =
-        L"NVIDIA Video Frame Generation is NVIDIA's software, not a part of Glasir. It is downloaded from NVIDIA "
-        L"(pypi.nvidia.com, about 440 MB) and stays under NVIDIA's licences:\n\n"
+        L"NVIDIA Video Frame Generation and NVIDIA's Video Super Resolution are NVIDIA's software, not a part of "
+        L"Glasir. They come in one package, downloaded from NVIDIA (pypi.nvidia.com, about 440 MB), and stay under "
+        L"NVIDIA's licences:\n\n"
         L"\x2022 <a href=\"https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-software-license-agreement/\">"
         L"NVIDIA Software License Agreement</a>\n"
         L"\x2022 <a href=\"https://www.nvidia.com/en-us/agreements/enterprise-software/product-specific-terms-for-ai-products/\">"
         L"Product-Specific Terms for NVIDIA AI Products</a>\n"
         L"\x2022 <a href=\"https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/\">"
         L"NVIDIA Open Model License</a>\n\n"
-        L"It needs an NVIDIA RTX 40 or 50 series GPU. By downloading it you accept these licences.";
+        L"Frame generation needs an NVIDIA RTX 40 or 50 series GPU, super resolution an RTX 20 series or later. By "
+        L"downloading them you accept these licences.";
     const wchar_t *footer = L"One of their terms: results of testing NVIDIA's software (its speed, its quality, "
                             L"comparisons) may not be published without NVIDIA's permission.";
     const TASKDIALOG_BUTTON buttons[] = {{kDownload, L"Accept and download"}};
@@ -144,7 +146,7 @@ bool ask_vfg_licence() {
     c.dwFlags = TDF_ENABLE_HYPERLINKS | TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
     c.pszWindowTitle = L"Glasir setup";
     c.pszMainIcon = TD_INFORMATION_ICON;
-    c.pszMainInstruction = L"Download NVIDIA Video Frame Generation";
+    c.pszMainInstruction = L"Download NVIDIA's frame generation and super resolution";
     c.pszContent = content.c_str();
     c.pszFooter = footer;
     c.pButtons = buttons;

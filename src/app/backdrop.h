@@ -57,6 +57,10 @@ public:
     // mpv left its own full screen: the borderless window goes back in place
     // (a window stays where mpv puts it back). Any thread.
     void place_again();
+    // mpv made its output anew while playing, its window with it
+    // (glasir_scaling.lua, leaving NVIDIA's super resolution): a borderless
+    // one goes back to its place. Any thread.
+    void window_rebuilt();
     void stop();
 
 private:

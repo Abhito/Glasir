@@ -28,11 +28,16 @@ credit. MPV-SW-Capture stays the owner's daily app until this one replaces it.
     runs on them all (310.8 needed an RTX 50; RHI's mirror labels its builds
     by GPU). RTX 20: `[dlss5] enabled = on` tries it. RTX Encore
     (SilyNoMeta/rtx-encore, closed source) was looked at and not needed.
-  - RTX Video Super Resolution.
+  - RTX Video Super Resolution, in the GPU's video engine (`scaling = vsr`)
+    and through NVIDIA's Video Effects SDK (`scaling = nvidia`, an opt-in
+    download, 2026-11-19).
   - NVIDIA Video Frame Generation in place of our own generator: RTX 40 and
     50 series, an opt-in download (done 2026-11-17, `Method=vfg`; not yet
     tried with a card or full screen with VRR). Our own stays the default and
-    the fall-back everywhere.
+    the fall-back everywhere. *(2026-11-19: `nvidia_quality = auto`: the
+    add-on picks the model, the largest that keeps up, and picks again as
+    the load changes - NVIDIA's filter has no such setting. Tried with a
+    test pattern, not yet with a card.)*
 - Capture cards: best effort, no guarantees. Goal: any card MPV-SW-Capture
   works with. Our Media Foundation capture (dedup, frame gen) first, with
   mpv's DirectShow input as a fallback; the app says which features the
@@ -66,7 +71,28 @@ Keep / build:
   cnn (ArtCNN C4F16 + FSR 1) and anime4k (Anime4K v4 mode A), vendored MIT
   shaders. Temporal upscalers (DLSS SR, FSR 2/3, XeSS) are left out: a
   capture has no camera jitter, depth or engine motion vectors, so they
-  would add ghosting and no detail)*
+  would add ghosting and no detail)* *(2026-11-19: "Scale to", `[video]
+  scale_to`: the scaler's output is a size of its own, 1440p, 4K or 5K
+  whatever the screen's, and mpv's scaler goes from there to the window:
+  down from a larger one (supersampling). In mpv, before DLSS 5 and frame
+  generation, which still work at the window's size: a picture larger than
+  the window after them would need a renderer of our own. Tested with a
+  test pattern and three game frames, SDR and HDR; not yet with a card)*
+  *(2026-11-19: `scaling = nvidia`, "NVIDIA Super Resolution": NVIDIA's
+  Video Super Resolution through its Video Effects SDK, run by the frame
+  generation add-on on mpv's frame before DLSS 5 (src/framegen/README.md).
+  What the driver's VSR does not give: a quality of our own choosing
+  (`scaling_quality`), the models for clean pictures, and G-SYNC. The same
+  download as NVIDIA Video Frame Generation. Tested with a test pattern,
+  SDR and HDR; not yet with a card. "Scale to" works with it: the effect
+  makes that size and a pass of the add-on's takes it to the window)*
+- NVIDIA Reflex's low latency mode on NVIDIA GPUs *(2026-11-19: `[video]
+  low_latency = off | on | boost`, off by default; the frame generation
+  add-on asks the driver, through its own nvapi64.dll. Measured with a test
+  pattern in a window, src/framegen/README.md: a clear gain with frame
+  generation while the GPU has time to spare, none with DLSS 5 on. Not yet
+  tried with a card, full screen, 30 fps, 3x and 4x, or NVIDIA Video Frame
+  Generation)*
 - Screenshots; window / full-screen controls (the menu switches at once:
   full screen (mpv's own, f / double-click), borderless, window).
   Borderless covers the whole screen, black bars included, unless
@@ -106,7 +132,7 @@ before, the newest of each):
 | DLSS5-Feeder (MIT) | jlrouzies-fr/DLSS5-Feeder releases |
 | RenoDX-DLSS5, nvngx_dlssnr.dll | RankFTW/rhi-repo releases (RHI's mirror) |
 | nvngx_dlss.dll | NVIDIA/DLSS releases |
-| NVIDIA Video Frame Generation (only on request, after NVIDIA's licences are accepted) | pypi.nvidia.com/nvidia-vfx |
+| NVIDIA Video Frame Generation and Video Super Resolution (one package; only on request, after NVIDIA's licences are accepted) | pypi.nvidia.com/nvidia-vfx |
 
 Shipped with notices: our code, MSC scripts we keep (MIT, TyRaS-SW),
 msc_audio (MIT, z-er), FSR1 / NIS / Adaptive Sharpen / KrigBilateral (LGPL,

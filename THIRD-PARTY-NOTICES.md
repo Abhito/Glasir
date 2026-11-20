@@ -194,7 +194,16 @@ SOFTWARE.
 
 The video super resolution (NVIDIA RTX, Intel) is the GPU maker's, in its
 driver; Glasir asks for it through mpv's d3d11vpp filter and includes none
-of it.
+of it. "NVIDIA Super Resolution" is NVIDIA's Video Effects SDK, downloaded
+only on request (the table at the end).
+
+NVIDIA Reflex's low latency mode is the NVIDIA driver's; Glasir asks for it
+through the driver's own `nvapi64.dll` and includes none of it. The numbers
+its calls are found by and the layout of their structures (in
+`src/common/nv_low_latency.h`, written for Glasir) are from NVIDIA's NVAPI
+SDK, https://github.com/NVIDIA/nvapi (R620), which is under the MIT licence
+(`LICENSES/MIT.txt` has the text): Copyright (c) 2019-2026 NVIDIA
+CORPORATION & AFFILIATES. All rights reserved.
 
 The menu uses the Segoe UI font that comes with Windows; Glasir does not
 include it.
@@ -230,4 +239,4 @@ first and downloads nothing unless you accept them:
 
 | Component | Source | Licence |
 |---|---|---|
-| NVIDIA Video Frame Generation (the Video Effects SDK's runtime, `engine\nvidia-vfg`) | https://pypi.nvidia.com/nvidia-vfx/ | NVIDIA Software License Agreement, Product-Specific Terms for NVIDIA AI Products, NVIDIA Open Model License (copies in `engine\nvidia-vfg\licenses`) |
+| NVIDIA Video Frame Generation and NVIDIA Video Super Resolution (the Video Effects SDK's runtime, `engine\nvidia-vfg`) | https://pypi.nvidia.com/nvidia-vfx/ | NVIDIA Software License Agreement, Product-Specific Terms for NVIDIA AI Products, NVIDIA Open Model License (copies in `engine\nvidia-vfg\licenses`) |

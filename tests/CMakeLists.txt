@@ -21,3 +21,9 @@ add_executable(test_audio test_audio.cpp)
 glasir_component(test_audio)
 target_link_libraries(test_audio PRIVATE glasir_capture)
 add_test(NAME audio COMMAND test_audio)
+
+# VfgQuality=auto's choice of model: arithmetic only (src/framegen/fg_vfg_auto.h).
+add_executable(test_vfg_auto test_vfg_auto.cpp)
+glasir_component(test_vfg_auto)
+target_include_directories(test_vfg_auto PRIVATE "${PROJECT_SOURCE_DIR}/src/framegen")
+add_test(NAME vfg_auto COMMAND test_vfg_auto)

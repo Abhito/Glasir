@@ -73,6 +73,8 @@ std::string status_line(const MenuFrame &f, const MpvState &mpv) {
             text[0] = 0;
         out += text;
     }
+    // As the NVIDIA driver has it for mpv's window, which is in front while the menu is open.
+    if (f.host && f.host->gsync && f.host->gsync() == 1) out += "  \xC2\xB7  G-SYNC";
     return out;
 }
 
@@ -147,12 +149,17 @@ void picture(const MenuFrame &f, const MpvState &mpv) {
             ui::warn("NVIDIA Video Frame Generation could not run (ReShade.log says why): Glasir's own makes the frames.");
         nvidia = nvidia && !fallen_back;
         if (nvidia && h.nvidia_quality && h.set_nvidia_quality) {
-            static const char *const kQuality[] = {"low", "medium", "high"};
+            static const char *const kQuality[] = {"low", "medium", "high", "auto"};
+            // Auto says which model it has picked.
+            static const char *const kPicked[] = {"Auto: Low", "Auto: Medium", "Auto: High"};
+            const int now = h.nvidia_quality_now ? std::clamp(h.nvidia_quality_now(), 0, 2) : 1;
+            const char *const pick = h.nvidia_quality() == 3 && h.nvidia_state && h.nvidia_state() > 0 ? kPicked[now] : "Auto";
             ImGui::PushID("nvidia");
-            const int q = ui::choice("Quality", {"Low", "Medium", "High"}, h.nvidia_quality(), column(),
+            const int q = ui::choice("Quality", {"Low", "Medium", "High", pick}, h.nvidia_quality(), column(),
                                      "NVIDIA's model. A larger one is cleaner and takes more GPU time, which adds "
                                      "delay. High is for 30 fps games with DLSS 5 off: with DLSS 5 on, Medium "
-                                     "gives more even frames.");
+                                     "gives more even frames.\nAuto picks the largest that keeps up with the game, "
+                                     "and picks again when the load changes.");
             ImGui::PopID();
             if (q >= 0) {
                 h.set_nvidia_quality(q);
@@ -187,7 +194,8 @@ void picture(const MenuFrame &f, const MpvState &mpv) {
             } else if (st.kind == FramegenStatus::Behind) {
                 // What would leave it room: DLSS 5 takes the most by far, then NVIDIA's larger models.
                 const char *room = dlss5_on ? " Turning DLSS 5 off leaves it room."
-                                   : nvidia && h.nvidia_quality && h.nvidia_quality() > 0 ? " A lower Quality leaves it room."
+                                   : nvidia && h.nvidia_quality && (h.nvidia_quality() == 1 || h.nvidia_quality() == 2)
+                                       ? " A lower Quality leaves it room."
                                    : !nvidia && !fast ? " Fast quality leaves it room."
                                                       : "";
                 std::snprintf(text, sizeof(text),
@@ -250,19 +258,27 @@ void sound(const MenuFrame &f, const MpvState &mpv, double now) {
 void picture_more(const MenuFrame &f, const MpvState &mpv) {
     // Scaling up (glasir_scaling.lua in mpv): switched at once.
     if (!mpv.scaling.empty()) {
-        static const char *const kModes[] = {"mpv", "fsr", "vsr", "cnn", "anime4k"};
+        static const char *const kModes[] = {"mpv", "fsr", "vsr", "nvidia", "cnn", "anime4k"};
         static const char *const kLabels[] = {"mpv (Lanczos)", "FSR 1 (sharper)", "VSR (NVIDIA RTX, Intel)",
-                                              "ArtCNN (more GPU time)", "Anime4K (more GPU time)"};
+                                              "NVIDIA SR (quality levels, G-SYNC)", "ArtCNN (more GPU time)",
+                                              "Anime4K (more GPU time)"};
+        constexpr int kCount = 6, kNvidia = 3;
         int current = -1;
-        for (int i = 0; i < 5; ++i)
+        for (int i = 0; i < kCount; ++i)
             if (mpv.scaling == kModes[i]) current = i;
+        // Glasir's own run of NVIDIA's super resolution: on an NVIDIA GPU (the driver answers the add-on).
+        const ScalerHost &scaler = scaler_host();
+        const bool nvidia_gpu = f.host->low_latency && f.host->low_latency() >= 0;
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("Scaling");
-        ui::tooltip("How a capture smaller than the screen is scaled up, before DLSS 5.");
+        ui::tooltip("How a capture smaller than the screen is scaled up, before DLSS 5. NVIDIA's VSR has quality "
+                    "levels (1 to 4, or Auto): those are set in the NVIDIA app, under System, Video. G-SYNC does "
+                    "not run while NVIDIA's VSR does; leaving it starts the picture again to get G-SYNC back.");
         ImGui::SameLine(column());
         ImGui::SetNextItemWidth(-1);
         if (ui::begin_combo("##scaling", current >= 0 ? kLabels[current] : mpv.scaling.c_str())) {
-            for (int i = 0; i < 5; ++i) {
+            for (int i = 0; i < kCount; ++i) {
+                if (i == kNvidia && !nvidia_gpu && i != current) continue;
                 if (ImGui::Selectable(kLabels[i], i == current) && i != current) {
                     f.mpv->command({"script-message", "glasir-scaling", kModes[i]});
                     save(f, "video", "scaling", kModes[i]);
@@ -270,6 +286,39 @@ void picture_more(const MenuFrame &f, const MpvState &mpv) {
                 if (i == current) ImGui::SetItemDefaultFocus();  // the keyboard starts on the one in use
             }
             ImGui::EndCombo();
+        }
+        // NVIDIA Super Resolution's model, switched at once.
+        if (current == kNvidia && scaler.level && scaler.set_level) {
+            static const char *const kQuality[] = {"low", "medium", "high", "ultra"};
+            ImGui::PushID("scaling");
+            const int q = ui::choice("Quality", {"Low", "Medium", "High", "Ultra"}, scaler.level(), column(),
+                                     "NVIDIA's quality level. A higher one is a larger model and takes more GPU time, which "
+                                     "DLSS 5 and frame generation also need.");
+            ImGui::PopID();
+            if (q >= 0) {
+                scaler.set_level(q);
+                save(f, "video", "scaling_quality", kQuality[q]);
+            }
+            if (scaler.state && scaler.state() < 0)
+                ui::warn("NVIDIA Super Resolution cannot run here (ReShade.log says why; Glasir's window offers its "
+                         "download): FSR 1 scales instead.");
+        }
+        // The size it scales to: the picture's place on the screen, or a
+        // size of its own (down to the screen from a larger one).
+        if (mpv.target >= 0) {
+            static constexpr int kLines[] = {0, 1440, 2160, 2880};
+            static const char *const kNames[] = {"screen", "1440", "2160", "2880"};
+            int at = -1;  // a height from glasir.ini that is none of these: none is lit
+            for (int i = 0; i < 4; ++i)
+                if (kLines[i] == mpv.target) at = i;
+            const int to = ui::choice("Scale to", {"Screen", "1440p", "4K", "5K"}, at, column(),
+                                      "The size the picture is scaled up to. A size larger than the screen is scaled "
+                                      "down to it afterwards: smoother edges and finer detail, for more GPU time. "
+                                      "Not used by mpv's own scaling.");
+            if (to >= 0) {
+                f.mpv->command({"script-message", "glasir-target", std::to_string(kLines[to])});
+                save(f, "video", "scale_to", kNames[to]);
+            }
         }
     }
 
@@ -288,6 +337,11 @@ void picture_more(const MenuFrame &f, const MpvState &mpv) {
         f.mpv->command({"script-message", "glasir-window", shown == 1 ? "borderless" : "windowed"});
         save(f, "window", "mode", shown == 1 ? "borderless" : "windowed");
     }
+    // A borderless window smaller than the screen (the black bars skipped) is flipped straight to the
+    // screen only while Windows gives it an overlay plane; composed, G-SYNC cannot follow it.
+    if (borderless && !mpv.fullscreen && f.host->composed && f.host->composed() == 1)
+        ui::note("Windows is composing this window, so G-SYNC cannot follow it. Full screen does not have that; "
+                 "nor does Borderless with \"Skip the black bars\" off (Glasir's window).");
     const bool hdr = signal_hdr(f, mpv);
     if (hdr || f.hdr_available) {  // a card without HDR modes has nothing to switch to
         static constexpr const char *kPicture[] = {"auto", "sdr", "hdr"};
@@ -328,6 +382,21 @@ void picture_more(const MenuFrame &f, const MpvState &mpv) {
             ui::note(mpv.rtx_hdr == "unavailable"
                          ? "The console sends SDR. RTX Video HDR could not start here (it needs HDR on in Windows)."
                          : "The console sends SDR: shown in HDR by RTX Video HDR.");
+    }
+    // NVIDIA Reflex's low latency mode, where the driver has it.
+    const Host &h = *f.host;
+    if (h.low_latency && h.set_low_latency && h.low_latency() >= 0) {
+        static const char *const kLatency[] = {"off", "on", "boost"};
+        // "Reflex" alone: the label has the room of "Scale to".
+        const int latency = ui::choice("Reflex", {"Off", "On", "Boost"}, h.low_latency(), column(),
+                                       "NVIDIA Reflex's low latency mode. With frame generation on a GPU that has "
+                                       "time to spare, frames reach the screen a few milliseconds sooner and more "
+                                       "evenly. Where DLSS 5 keeps the GPU busy it changes little. Boost also keeps "
+                                       "the GPU at full clock speed: more power and heat.");
+        if (latency >= 0) {
+            h.set_low_latency(latency);
+            save(f, "video", "low_latency", kLatency[latency]);
+        }
     }
 }
 

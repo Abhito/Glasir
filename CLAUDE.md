@@ -62,6 +62,62 @@
   `Selected=0x1BEC192E` in ReShade.ini's `[OVERLAY] Docking` is Add-ons.
   `GLASIR_FRAMEGEN_CAPTURE_AFTER=<s>` makes the add-on save frames to
   `out\Glasir\Captures` (16-bit PQ for HDR: tone-map before viewing).
+- "Scale to" (`[video] scale_to`: screen, or a height in lines; launcher and
+  menu): glasir_scaling.lua scales to that size and mpv's own scaler goes
+  from there to the window (down from a larger one: supersampling). mpv's
+  shaders can only size their output by the window (`OUTPUT`), so for a
+  target the script writes a copy of each with the numbers in its `//!` lines
+  (`engine\portable_config\shaders\sized_<w>x<h>_<name>`, removed at the next
+  start; mpv keeps a shader by its path, so the size is in the name). The
+  vendored shaders stay unmodified. It happens in mpv: DLSS 5 and frame
+  generation still work at the window's size. Test with
+  `python tools/scaling_check.py --target 2160 --size 1920x1080 --window
+  2560x1440 [--format p010 --hdr]`.
+- NVIDIA Reflex (`[video] low_latency = off | on | boost`, off by default;
+  `LowLatency` in the add-on, `src/common/nv_low_latency.h`, its section in
+  src/framegen/README.md with what was measured): the calls are found in the
+  driver's own nvapi64.dll at run time, never linked or shipped; the header's
+  structures were checked against NVIDIA's nvapi.h with static_asserts in a
+  scratch build (do that again when one is added). `GLASIR_LATENCY_LOG=1`
+  logs the driver's timings with the mode off too. Compare runs only in one
+  VRR state (it follows the window's focus), in turn, more than one pair,
+  with a steady source (`raw_pace`) and PresentMon; the tools' `--set
+  video.low_latency=on` switches it.
+- G-SYNC and NVIDIA's super resolution (found 2026-11-19, "G-SYNC and RTX
+  Video Super Resolution" in src/framegen/README.md): the driver runs no
+  G-SYNC on a Direct3D device RTX VSR runs on, nor after, until mpv has a
+  new device. Leaving VSR, glasir_scaling.lua makes mpv's output anew (a
+  change of `d3d11-warp`; only where the add-on has seen G-SYNC run:
+  `GsyncSeen` in ReShade.ini, `user-data/glasir/gsync` in mpv). Anything
+  that makes mpv's output anew gives mpv a new window (backdrop.cpp finds
+  it) and takes the foreground away unless mpv's process gave itself leave
+  first (`keep_foreground` in the add-on); ReShade then loads the other
+  add-ons anew while ours stays loaded, and everything of ours made on the
+  device must be let go with the swap chain (`on_destroy_swapchain`: by
+  `destroy_device` the add-on no longer knows the device as mpv's).
+  To see whether G-SYNC runs: the menu's top line, "G-SYNC on/off for mpv's
+  window" in ReShade.log, or PresentMon (sync interval 0 and tearing
+  allowed). It needs mpv's window in front and covering the screen, so the
+  test takes the owner's screen for half a minute: keep such runs few, and
+  look at what was in front before believing a result.
+- NVIDIA Super Resolution (`[video] scaling = nvidia`, `scaling_quality`;
+  `SrQuality` and `Upscale` in the add-on, `src/framegen/fg_sr.h`, its
+  section in src/framegen/README.md): NVIDIA's Video Super Resolution from
+  the Video Effects SDK, run by the add-on at mpv's present on a picture mpv
+  draws unscaled (`video-unscaled`, `user-data/glasir/sr`); FSR 1 until the
+  add-on says `glasir-sr ready`, and where it cannot run. Its two DLLs come
+  with NVIDIA Video Frame Generation's download (below; the same rules: on a
+  copy of the app folder, never in the repo or the zip) and
+  `fg_nvfx.h` is what the two share: after a change there, check both
+  (`fg_eval --methods repeat,vfg` gives the scores it gave before;
+  `eval\sr_eval.py --exe sr_eval.exe` gives the SDK's own bytes). Test with
+  `python tools/scaling_check.py --nvidia [--target 2160] [--format p010
+  --hdr]`. "Scale to" with it: the effect makes that size and
+  `fg_resample.h` (`resample.hlsl`) takes it to the window; `sr_eval
+  --resample WxH` runs that pass alone, to check against the same sums in
+  numpy after a change. NVIDIA's licence covers it as it does frame
+  generation: no scores or timings of it anywhere but in chat with the
+  owner.
 - NVIDIA Video Frame Generation (`Method=vfg`, `src/framegen/fg_vfg.h`, its
   section in src/framegen/README.md): an opt-in generator on RTX 40/50,
   glasir.ini `[framegen] method = nvidia`, `nvidia_quality`. Its DLLs are
@@ -73,7 +129,13 @@
   `fg_eval --methods repeat,vfg` (must give `eval\vfg_eval.py`'s scores) and
   `tools/smoke_raw.py` on a copy whose ReShade.ini says `Method=vfg`
   (`--window 2560x1440` for a larger window); `GLASIR_VFG_PROFILE=1` logs
-  the calling thread's time per frame. NVIDIA's licence (Software License
+  the calling thread's time per frame. `nvidia_quality = auto`
+  (`VfgQuality=auto`, `fg_vfg_auto.h`, its part of src/framegen/README.md)
+  is the add-on's own choice of model by load, NVIDIA's filter having none:
+  its rules are tested in `tests/test_vfg_auto.cpp` with made-up costs, and
+  in the app with a source whose rate of new frames changes (ReShade.log:
+  "VfgQuality=auto: ... now"). Its log lines give reasons in words, never
+  timings. NVIDIA's licence (Software License
   Agreement 8.9) forbids giving benchmark, comparison or performance results
   of its software to others: never put this method's scores or timings in
   the repo, commit messages, issues, pull requests or logs users send in.

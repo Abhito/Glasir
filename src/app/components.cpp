@@ -557,6 +557,10 @@ bool install_dlss5(const std::wstring &engine, Fetcher &f, std::wstring &error) 
 // What the frame generation add-on loads from engine\nvidia-vfg (fg_vfg.h).
 constexpr const wchar_t *kVfgFiles[] = {L"cudart64_12.dll", L"NVCVImage.dll", L"nvngxruntime.dll",
                                         L"NVVideoEffects.dll", L"nvVFXVideoFrameGeneration.dll"};
+// And for NVIDIA's Video Super Resolution (fg_sr.h; video.scaling = nvidia),
+// from the same package into the same folder: the first four of the above,
+// and these. Installs made before Glasir had it lack them.
+constexpr const wchar_t *kSrFiles[] = {L"nvVFXVideoSuperRes.dll", L"nvngx_vsr.dll"};
 
 // "0.2.0.0" as numbers, to tell which of two is newer.
 std::vector<int> version_numbers(const std::string &text) {
@@ -599,13 +603,15 @@ bool install_vfg(const std::wstring &engine, Fetcher &f, std::wstring &error) {
 
     f.dl().step(L"Unpacking " + label);
     const std::wstring unpacked = f.work() + L"\\vfg";
+    std::vector<const wchar_t *> files(std::begin(kVfgFiles), std::end(kVfgFiles));
+    files.insert(files.end(), std::begin(kSrFiles), std::end(kSrFiles));
     std::vector<std::wstring> members;
-    for (const wchar_t *file : kVfgFiles) members.push_back(std::wstring(L"nvvfx/libs/") + file);
+    for (const wchar_t *file : files) members.push_back(std::wstring(L"nvvfx/libs/") + file);
     if (!unpack(got.file, unpacked, members, error)) return fail(error);
     const std::wstring stage = f.work() + L"\\nvidia-vfg";
     std::error_code ec;
     fs::create_directories(stage + L"\\licenses", ec);
-    for (const wchar_t *file : kVfgFiles) {
+    for (const wchar_t *file : files) {
         const std::wstring from = unpacked + L"\\nvvfx\\libs\\" + file;
         if (!file_exists(from)) return fail(std::wstring(L"no ") + file + L" in the download");
         std::wstring signer;
@@ -668,6 +674,14 @@ bool component_installed(const std::wstring &engine_dir, Component c) {
         return true;
     }
     return false;
+}
+
+bool nvidia_sr_installed(const std::wstring &engine_dir) {
+    for (size_t i = 0; i < 4; ++i)  // what every effect of the SDK loads
+        if (!file_exists(engine_dir + L"\\nvidia-vfg\\" + kVfgFiles[i])) return false;
+    for (const wchar_t *file : kSrFiles)
+        if (!file_exists(engine_dir + L"\\nvidia-vfg\\" + file)) return false;
+    return true;
 }
 
 std::vector<std::wstring> installed_versions(const std::wstring &engine_dir) {

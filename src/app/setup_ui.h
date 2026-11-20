@@ -21,8 +21,9 @@ struct SetupChoice {
 // Asks what to download. nullopt if the user said no.
 std::optional<std::vector<Component>> ask_setup(const SetupChoice &choice);
 
-// NVIDIA's licences for its Video Frame Generation, which is downloaded only
-// once the user has accepted them here. False: not accepted.
+// NVIDIA's licences for its Video Frame Generation and Video Super Resolution,
+// which are downloaded (one package) only once the user has accepted them
+// here. False: not accepted.
 bool ask_vfg_licence();
 
 // A job with a progress window (dialogs; Cancel sets cancel) or without.

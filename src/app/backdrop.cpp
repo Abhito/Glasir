@@ -22,6 +22,7 @@ constexpr UINT_PTR kSettleTimer = 3;
 constexpr DWORD kCursorIdleMs = 1000;  // as mpv hides its own after a moment
 constexpr UINT kSetMode = WM_APP + 1;  // thread message: wparam 1 = full screen, 0 = a window
 constexpr UINT kPlaceAgain = WM_APP + 2;  // thread message: mpv left its own full screen
+constexpr UINT kRebuilt = WM_APP + 3;     // thread message: mpv made its window anew
 // After a switch, mpv's window is put in place again for this long if mpv
 // (which changes its border on its own thread) moves it back meanwhile.
 constexpr ULONGLONG kSettleMs = 1500;
@@ -31,6 +32,7 @@ constexpr LONG kWindowWidth = 1280, kWindowHeight = 720;  // as mpv's --geometry
 struct State {
     HWND window = nullptr;
     HWND mpv = nullptr;
+    DWORD pid = 0;  // mpv's: its window can be a new one (current())
     WindowSetup setup;
     ComPtr<ITaskbarList2> taskbar;
     bool marked = false;  // the taskbar treats mpv's window as full screen
@@ -41,6 +43,7 @@ struct State {
     ULONGLONG settle_until = 0;
     POINT last_point{-1, -1};
     DWORD last_move = 0;
+    bool rebuilt = false;  // mpv said it makes its window anew: placed once it is there
 };
 thread_local State *t_state = nullptr;
 
@@ -84,6 +87,18 @@ HWND find_mpv(DWORD pid) {
         },
         reinterpret_cast<LPARAM>(&f));
     return f.found;
+}
+
+// mpv's window as it is now: mpv makes a new one when it builds its output
+// again while playing (glasir_scaling.lua). False while it has none.
+bool current(State &s) {
+    if (IsWindow(s.mpv)) return true;
+    const HWND again = find_mpv(s.pid);
+    if (!again) return false;
+    s.mpv = again;
+    s.marked = false;  // the taskbar's mark was the old window's
+    log(L"window: mpv made a new one");
+    return true;
 }
 
 // Full screen: where mpv's window goes on its monitor.
@@ -137,6 +152,22 @@ void settle_for(State &s, const RECT &target, ULONGLONG ms) {
     SetTimer(s.window, kSettleTimer, 30, nullptr);
 }
 
+// mpv's window to its place for the mode it is in, once mpv has it as the
+// mode asks (settle()).
+void place(State &s, ULONGLONG ms) {
+    if (s.setup.borderless) {
+        settle_for(s, full_screen_rect(s), ms);
+    } else {
+        const UINT dpi = GetDpiForWindow(s.mpv);
+        settle_for(s,
+                   centre_window(work_rect(s.mpv), MulDiv(kWindowWidth, dpi ? dpi : 96, 96),
+                                 MulDiv(kWindowHeight, dpi ? dpi : 96, 96)),
+                   ms);
+    }
+    mark_full_screen(s, boxed(s));
+    sync(s);
+}
+
 // Full screen or a window. mpv changes its border itself (keeping its
 // client area where it is); its window is then put in place by settle().
 void switch_mode(State &s, bool borderless) {
@@ -145,17 +176,7 @@ void switch_mode(State &s, bool borderless) {
         s.setup.mpv_command({L"set", L"fullscreen", L"no"});
         s.setup.mpv_command({L"set", L"border", borderless ? L"no" : L"yes"});
     }
-    if (borderless) {
-        settle_for(s, full_screen_rect(s), kSettleMs);
-    } else {
-        const UINT dpi = GetDpiForWindow(s.mpv);
-        settle_for(s,
-                   centre_window(work_rect(s.mpv), MulDiv(kWindowWidth, dpi ? dpi : 96, 96),
-                                 MulDiv(kWindowHeight, dpi ? dpi : 96, 96)),
-                   kSettleMs);
-    }
-    mark_full_screen(s, boxed(s));
-    sync(s);
+    place(s, kSettleMs);
     log(L"window: {} (the menu)", borderless ? (boxed(s) ? L"full screen, black around the picture" : L"full screen")
                                              : L"a window");
 }
@@ -228,6 +249,11 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         } else if (wparam == kSettleTimer) {
             settle(*s);
         } else if (wparam == kCursorTimer) {
+            if (!IsWindow(s->mpv) && current(*s)) {  // mpv made its window anew
+                if (s->rebuilt && s->setup.borderless) place(*s, 3000);
+                else sync(*s);
+                s->rebuilt = false;
+            }
             if (GetForegroundWindow() == s->mpv && IsWindowVisible(hwnd) && !right_below(*s)) sync(*s);
             if (GetTickCount() - s->last_move >= kCursorIdleMs) {
                 POINT p{};
@@ -280,6 +306,10 @@ void Backdrop::place_again() {
     if (const DWORD id = thread_id_.load()) PostThreadMessageW(id, kPlaceAgain, 0, 0);
 }
 
+void Backdrop::window_rebuilt() {
+    if (const DWORD id = thread_id_.load()) PostThreadMessageW(id, kRebuilt, 0, 0);
+}
+
 void Backdrop::stop() {
     if (!thread_.joinable()) return;
     stopping_ = true;
@@ -308,6 +338,7 @@ void Backdrop::run() {
     RegisterClassExW(&wc);  // already registered by an earlier session: fine
     State state;
     state.mpv = mpv;
+    state.pid = pid_;
     state.setup = setup_;
     const RECT mon = monitor_rect(mpv);
     state.window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"Glasir", WS_POPUP, mon.left, mon.top,
@@ -350,14 +381,27 @@ void Backdrop::run() {
 
     while (!stopping_ && GetMessageW(&msg, nullptr, 0, 0) > 0) {
         if (!msg.hwnd && msg.message == kSetMode) {
-            if (IsWindow(mpv)) switch_mode(state, msg.wParam != 0);
+            if (current(state)) switch_mode(state, msg.wParam != 0);
             continue;
         }
         if (!msg.hwnd && msg.message == kPlaceAgain) {
-            if (IsWindow(mpv) && state.setup.borderless) {
+            if (current(state) && state.setup.borderless) {
                 settle_for(state, full_screen_rect(state), kSettleMs);
                 mark_full_screen(state, boxed(state));
                 sync(state);
+            }
+            continue;
+        }
+        if (!msg.hwnd && msg.message == kRebuilt) {
+            // Borderless, it goes to its place as at the start; a window
+            // is where mpv made it, as large as the one before.
+            // The new window may not be there yet: then the timer places it when it comes.
+            if (!state.setup.borderless) continue;
+            if (current(state)) {
+                state.rebuilt = false;
+                place(state, 3000);
+            } else {
+                state.rebuilt = true;
             }
             continue;
         }

@@ -440,6 +440,50 @@ int main() {
                    read(L"\\ReShade.ini").find("NeuralUplift=1") != std::string::npos &&
                    read(L"\\dlss5-feed.cfg") == "enabled=1\r\nmode=2\r\n",
                "DLSS 5 loaded but off: no effects, add-ons ready for the menu");
+        expect(read(L"\\ReShade.ini").find("LowLatency=off") != std::string::npos,
+               "NVIDIA Reflex: off unless glasir.ini asks for it");
+        expect(read(L"\\ReShade.ini").find("SrQuality=medium") != std::string::npos,
+               "NVIDIA Super Resolution: the add-on is told its model, medium unless glasir.ini says another");
+        expect(read(L"\\ReShade.ini").find("VfgQuality=medium") != std::string::npos,
+               "NVIDIA Video Frame Generation: medium unless glasir.ini says another");
+        {
+            Settings pick = s;
+            pick.nvidia_quality = 3;
+            write_reshade_config(engine, pick, true, false);
+            expect(read(L"\\ReShade.ini").find("VfgQuality=auto") != std::string::npos,
+                   "NVIDIA Video Frame Generation: nvidia_quality = auto reaches the add-on");
+        }
+        {
+            Settings sr = s;
+            sr.scaling_quality = 3;
+            write_reshade_config(engine, sr, true, false);
+            expect(read(L"\\ReShade.ini").find("SrQuality=ultra") != std::string::npos,
+                   "NVIDIA Super Resolution: glasir.ini's scaling_quality reaches the add-on");
+        }
+        {
+            // The same download as NVIDIA's frame generation; an install made before lacks two files.
+            expect(!nvidia_sr_installed(engine), "NVIDIA Super Resolution: not installed without its files");
+            CreateDirectoryW((engine + L"\\nvidia-vfg").c_str(), nullptr);
+            for (const wchar_t *file : {L"cudart64_12.dll", L"NVCVImage.dll", L"nvngxruntime.dll", L"NVVideoEffects.dll",
+                                        L"nvVFXVideoFrameGeneration.dll"})
+                touch((std::wstring(L"\\nvidia-vfg\\") + file).c_str(), "x");
+            expect(component_installed(engine, Component::Vfg) && !nvidia_sr_installed(engine),
+                   "NVIDIA Super Resolution: an older install has frame generation without it");
+            touch(L"\\nvidia-vfg\\nvVFXVideoSuperRes.dll", "x");
+            touch(L"\\nvidia-vfg\\nvngx_vsr.dll", "x");
+            expect(nvidia_sr_installed(engine), "NVIDIA Super Resolution: installed with its two files beside the SDK's");
+            for (const wchar_t *file : {L"cudart64_12.dll", L"NVCVImage.dll", L"nvngxruntime.dll", L"NVVideoEffects.dll",
+                                        L"nvVFXVideoFrameGeneration.dll", L"nvVFXVideoSuperRes.dll", L"nvngx_vsr.dll"})
+                DeleteFileW((engine + L"\\nvidia-vfg\\" + file).c_str());
+            RemoveDirectoryW((engine + L"\\nvidia-vfg").c_str());
+        }
+        {
+            Settings reflex = s;
+            reflex.low_latency = 2;
+            write_reshade_config(engine, reflex, true, false);
+            expect(read(L"\\ReShade.ini").find("LowLatency=boost") != std::string::npos,
+                   "NVIDIA Reflex: the add-on is told glasir.ini's mode");
+        }
         write_reshade_config(engine, s, false, false);
         expect(read(L"\\ReShade.ini").find("NeuralUplift=0") != std::string::npos, "DLSS 5 off: NeuralUplift=0");
         expect(read(L"\\dlss5-feed.cfg") == "enabled=0\r\nmode=2\r\n", "DLSS 5 off: Feeder off, its other keys kept");
@@ -625,6 +669,36 @@ int main() {
                    apply_override(s, L"video.scaling=Anime4K", error) && s.scaling == Settings::Scaling::Anime4k &&
                    std::wstring(scaling_name(s.scaling)) == L"anime4k" && apply_override(s, L"video.scaling=vsr", error),
                "video.scaling: cnn and anime4k, named back the same");
+        expect(s.scaling_quality == 1 && apply_override(s, L"video.scaling=NVIDIA", error) &&
+                   s.scaling == Settings::Scaling::Nvidia && std::wstring(scaling_name(s.scaling)) == L"nvidia" &&
+                   apply_override(s, L"video.scaling_quality=Ultra", error) && s.scaling_quality == 3 &&
+                   std::wstring(scaling_quality_name(s.scaling_quality)) == L"ultra" &&
+                   !apply_override(s, L"video.scaling_quality=4", error) && s.scaling_quality == 3 &&
+                   apply_override(s, L"video.scaling_quality=low", error) && s.scaling_quality == 0 &&
+                   std::wstring(scaling_quality_name(1)) == L"medium" && apply_override(s, L"video.scaling=vsr", error),
+               "video.scaling = nvidia and its scaling_quality: medium by default, low to ultra");
+        expect(s.nvidia_quality == 1 && apply_override(s, L"framegen.nvidia_quality=Auto", error) && s.nvidia_quality == 3 &&
+                   std::wstring(nvidia_quality_name(s.nvidia_quality)) == L"auto" &&
+                   !apply_override(s, L"framegen.nvidia_quality=ultra", error) && s.nvidia_quality == 3 &&
+                   apply_override(s, L"framegen.nvidia_quality=high", error) && s.nvidia_quality == 2 &&
+                   std::wstring(nvidia_quality_name(0)) == L"low" && std::wstring(nvidia_quality_name(1)) == L"medium" &&
+                   apply_override(s, L"framegen.nvidia_quality=medium", error),
+               "framegen.nvidia_quality: medium by default; low, medium, high or auto");
+        expect(s.scale_to == 0 && scale_to_name(s.scale_to) == L"screen" &&
+                   apply_override(s, L"video.scale_to=2160", error) && s.scale_to == 2160 &&
+                   scale_to_name(s.scale_to) == L"2160" && apply_override(s, L"video.scale_to=1440p", error) &&
+                   s.scale_to == 1440 && !apply_override(s, L"video.scale_to=1441", error) &&
+                   !apply_override(s, L"video.scale_to=100", error) && !apply_override(s, L"video.scale_to=8000", error) &&
+                   !apply_override(s, L"video.scale_to=4k", error) && s.scale_to == 1440 &&
+                   apply_override(s, L"video.scale_to=Screen", error) && s.scale_to == 0,
+               "video.scale_to: the screen by default, or an even height in lines");
+        expect(s.low_latency == 0 && apply_override(s, L"video.low_latency=on", error) && s.low_latency == 1 &&
+                   apply_override(s, L"video.low_latency=Boost", error) && s.low_latency == 2 &&
+                   std::wstring(low_latency_name(s.low_latency)) == L"boost" &&
+                   !apply_override(s, L"video.low_latency=ultra", error) && s.low_latency == 2 &&
+                   apply_override(s, L"video.low_latency=off", error) && s.low_latency == 0 &&
+                   std::wstring(low_latency_name(s.low_latency)) == L"off",
+               "video.low_latency: off by default, on, boost");
         expect(apply_override(s, L"window.mode=fullscreen", error) && s.fullscreen && s.borderless &&
                    apply_override(s, L"window.mode=borderless", error) && !s.fullscreen && s.borderless &&
                    apply_override(s, L"window.mode=windowed", error) && !s.fullscreen && !s.borderless &&
@@ -648,12 +722,20 @@ int main() {
         plan.layout.height = 1080;
         s.hdr = true;
         s.hdr_peak_nits = 800;
+        {
+            const auto screen = mpv_arguments(plan, s);
+            bool found = false;
+            for (const auto &a : screen) found = found || a == L"--script-opts-append=glasir_scaling-target=0";
+            expect(found, "mpv scales to the picture's place on the screen unless told a size");
+        }
+        s.scale_to = 2160;
         const auto args = mpv_arguments(plan, s);
         auto has = [&](const wchar_t *arg) {
             for (const auto &a : args)
                 if (a == arg) return true;
             return false;
         };
+        expect(has(L"--script-opts-append=glasir_scaling-target=2160"), "mpv gets the size to scale to");
         expect(has(L"--script-opts-append=glasir_scaling-mode=vsr") &&
                    has(L"--script-opts-append=glasir_scaling-hdr=yes") &&
                    has(L"--script-opts-append=glasir_scaling-hdr_peak=800") &&

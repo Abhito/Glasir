@@ -9,6 +9,7 @@ it and prints Glasir's log. Opens a 1280x720 window for a few seconds.
     python tools/smoke_raw.py --format p010 --hdr
     python tools/smoke_raw.py --format yuy2 --game-fps 60
     python tools/smoke_raw.py --size 2560x1440 --window 2560x1440   # a larger window than 1280x720
+    python tools/smoke_raw.py --set video.low_latency=on --seconds 20   # NVIDIA Reflex: see engine\\ReShade.log
 """
 import argparse
 import json
@@ -55,6 +56,7 @@ def main():
     p.add_argument('--hdr', action='store_true')
     p.add_argument('--seconds', type=float, default=5)
     p.add_argument('--window', default='', help="mpv's window size (as it comes: 1280x720)")
+    p.add_argument('--set', action='append', default=[], help='another glasir.ini value, e.g. video.low_latency=on')
     a = p.parse_args()
     width, height = (int(v) for v in a.size.split('x'))
 
@@ -66,7 +68,8 @@ def main():
     glasir = subprocess.Popen(
         [os.path.join(a.app, 'Glasir.exe'), '--no-dialogs', '--input-raw', '-', '--raw-format', a.format,
          '--set', f'capture.width={width}', '--set', f'capture.height={height}', '--set', f'capture.fps={a.fps:g}',
-         '--set', 'window.mode=windowed', '--set', f'video.mode={"hdr" if a.hdr else "sdr"}', '--set', 'video.rtx_hdr=0'],
+         '--set', 'window.mode=windowed', '--set', f'video.mode={"hdr" if a.hdr else "sdr"}', '--set', 'video.rtx_hdr=0'] +
+        [x for s in a.set for x in ('--set', s)],
         stdin=ffmpeg.stdout)
     ffmpeg.stdout.close()
 

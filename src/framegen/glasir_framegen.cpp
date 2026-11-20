@@ -51,8 +51,11 @@
 #include <reshade.hpp>
 
 #include "fg_interp.h"
+#include "fg_sr.h"
+#include "fg_resample.h"
 #include "fg_vfg.h"
 #include "framegen_link.h"
+#include "nv_low_latency.h"
 #include "overlay.h"
 #include "reshade_ui.h"
 
@@ -98,11 +101,23 @@ struct Settings {
     // then what takes over where it cannot run.
     bool vfg = false;
     fg::VfgMode vfg_mode = fg::VfgMode::medium;  // VfgQuality=low|medium|high: its model's size
+    // VfgQuality=auto: the add-on picks the model, the largest that keeps up, and picks again as the
+    // load changes (fg_vfg_auto.h); vfg_mode is then the one in use now.
+    bool vfg_auto = false;
     bool vfg_auto_cut = true;   // VfgAutoCut: its own cut detection (frame A again across a cut)
     std::string vfg_runtime;    // VfgRuntime: the folder with its DLLs; empty: nvidia-vfg beside mpv.exe
     // Multiplier=2|3|4: frames shown for each of the source's - one, two or three of them generated -
     // or as many as the display can show. 3 and 4 are there for whoever wants them, as they are.
     int multiplier = 2;
+    // SrQuality=low|medium|high|ultra: the model of NVIDIA's Video Super Resolution (Upscale below;
+    // glasir.ini video.scaling = nvidia, scaling_quality).
+    fg::SrLevel sr_level = fg::SrLevel::medium;
+    // LowLatency=off|on|boost: NVIDIA Reflex's low latency mode on mpv's device (LowLatency below).
+    int low_latency = 0;
+    // GsyncSeen=1: the NVIDIA driver has run G-SYNC on mpv's window on this PC (written the first time it
+    // does, LowLatency::watch): glasir_scaling.lua then has mpv's output made anew when RTX Video Super
+    // Resolution is left, which is what brings G-SYNC back.
+    bool gsync_seen = false;
     std::string mpv_pipe = "glasir";
 };
 
@@ -229,8 +244,32 @@ void load_settings() {
         s.vfg_mode = fg::VfgMode::medium;
     else if (vfg_quality == "high")
         s.vfg_mode = fg::VfgMode::high;
+    else if (vfg_quality == "auto")
+        s.vfg_auto = true;  // from medium
     else
         bad_setting("VfgQuality", vfg_quality);
+    std::string seen;
+    if (read_text("GsyncSeen", seen)) parse_bool(seen, s.gsync_seen);  // not written until it is seen
+    std::string sr_quality = "medium";
+    setting("SrQuality", sr_quality);
+    for (auto &c : sr_quality) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    if (sr_quality == "low")
+        s.sr_level = fg::SrLevel::low;
+    else if (sr_quality == "medium")
+        s.sr_level = fg::SrLevel::medium;
+    else if (sr_quality == "high")
+        s.sr_level = fg::SrLevel::high;
+    else if (sr_quality == "ultra")
+        s.sr_level = fg::SrLevel::ultra;
+    else
+        bad_setting("SrQuality", sr_quality);
+    std::string low_latency = "off";
+    setting("LowLatency", low_latency);
+    for (auto &c : low_latency) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    if (low_latency == "off" || low_latency == "on" || low_latency == "boost")
+        s.low_latency = low_latency == "boost" ? 2 : low_latency == "on" ? 1 : 0;
+    else
+        bad_setting("LowLatency", low_latency);
     setting("VfgAutoCut", s.vfg_auto_cut);
     read_text("VfgRuntime", s.vfg_runtime);  // not written back: empty is the folder beside mpv.exe
     std::string quality = s.fast ? "fast" : "high";
@@ -266,9 +305,11 @@ std::wstring vfg_runtime_folder() {
     return folder + L"nvidia-vfg";
 }
 
-const char *vfg_quality_name() {
+// The model in use, and VfgQuality as it is set ("auto" where the add-on picks).
+const char *vfg_mode_name() {
     return g_settings.vfg_mode == fg::VfgMode::low ? "low" : g_settings.vfg_mode == fg::VfgMode::high ? "high" : "medium";
 }
+const char *vfg_quality_name() { return g_settings.vfg_auto ? "auto" : vfg_mode_name(); }
 
 // ---- Time ----------------------------------------------------------------------
 
@@ -1242,6 +1283,497 @@ private:
     UINT stencil_ref_ = 0;
 };
 
+// ---- NVIDIA Reflex -------------------------------------------------------------
+//
+// LowLatency=on|boost: NVIDIA Reflex's low latency mode on mpv's device
+// (nv_low_latency.h; an NVIDIA GPU's driver only). This add-on is where it
+// can be asked for: it is in mpv's process, on the thread of mpv's presents.
+//
+// The driver is told the mode once, and called once a frame after mpv's
+// present has returned and the frames this add-on presents after it are
+// queued - where mpv goes back to wait for the next frame, so where the next
+// frame's work starts. If frames are queueing before the GPU, the driver
+// waits there, so that the next one is started later and shown as early.
+// mpv's work on a frame cannot be marked for the driver (it is done before
+// the present this add-on sees): the frame is marked from mpv's present on,
+// which is what the driver's timings in the log are counted from.
+//
+// GLASIR_LATENCY_LOG=1 marks the frames and logs those timings with the mode
+// off too, to compare.
+class LowLatency {
+public:
+    // mpv's device is known. On mpv's render thread, like everything here.
+    void start(ID3D11Device *device) {
+        device_ = device;
+        char text[8] = {};
+        const DWORD len = GetEnvironmentVariableA("GLASIR_LATENCY_LOG", text, sizeof(text));
+        measure_ = len > 0 && len < sizeof(text) && strcmp(text, "0") != 0;
+        offered_ = nv_.offered(device);
+        active_ = false;
+        stage_ = 0;
+        gsync_ = composed_ = -1;
+        next_watch_ = 0;
+        if (!offered_) {
+            if (g_settings.low_latency > 0)
+                log_line(reshade::log::level::warning,
+                         "LowLatency=%s: NVIDIA Reflex is not available on mpv's device (no NVIDIA driver, or mpv "
+                         "is on another GPU)",
+                         name());
+            return;
+        }
+        if (g_settings.low_latency > 0)
+            apply();
+        else if (measure_)
+            log_line(reshade::log::level::info, "NVIDIA Reflex: off; GLASIR_LATENCY_LOG: the driver's timings are logged");
+    }
+
+    // The device is going away.
+    void stop() {
+        device_ = nullptr;
+        offered_ = active_ = false;
+        stage_ = 0;
+    }
+
+    // For the menu: 0 off, 1 on, 2 on with boost; -1 where the driver has no such thing.
+    int mode() const { return offered_ ? g_settings.low_latency : -1; }
+    // For the menu's top line: G-SYNC is following mpv's frames (1), is not (0), or the driver does not say (-1).
+    int gsync() const { return offered_ ? gsync_ : -1; }
+    // Windows composes mpv's window (1), flips its frames straight to the screen (0), or the driver does not say (-1).
+    int composed() const { return offered_ ? composed_ : -1; }
+    void set(int mode) {
+        g_settings.low_latency = std::clamp(mode, 0, 2);
+        reshade::set_config_value(nullptr, kSection, "LowLatency", name());
+        if (offered_) apply();
+    }
+
+    // mpv called Present: the frame starts here, as far as the driver is told.
+    void frame_start() {
+        if (!marking()) return;
+        // How long a new frame takes from the card to here (mpv's reading,
+        // scaling and drawing of it), for the log: the part before the
+        // driver's own timings start.
+        if (g_link.linked()) {
+            const LONG64 published = g_link.published();
+            const double age = g_link.since_last(qpc_seconds());
+            if (published != published_ && age >= 0 && age < 0.1) {
+                arrival_sum_ += age;
+                ++arrival_n_;
+            }
+            published_ = published;
+        }
+        ++frame_;
+        nv_.mark(device_, glasir::NvLowLatency::SimulationStart, frame_);
+        nv_.mark(device_, glasir::NvLowLatency::SimulationEnd, frame_);
+        nv_.mark(device_, glasir::NvLowLatency::RenderSubmitStart, frame_);
+        stage_ = 1;
+    }
+    // ReShade's effects and this add-on have drawn: the present itself is next.
+    void before_present() {
+        if (stage_ != 1) return;
+        nv_.mark(device_, glasir::NvLowLatency::RenderSubmitEnd, frame_);
+        nv_.mark(device_, glasir::NvLowLatency::PresentStart, frame_);
+        stage_ = 2;
+    }
+    // mpv's present has returned.
+    void presented() {
+        if (stage_ == 2) nv_.mark(device_, glasir::NvLowLatency::PresentEnd, frame_);
+        stage_ = 0;
+    }
+    // The frame's last present is queued: the driver's wait, and a line in
+    // the log every 5 s. timings: the driver's timings may be logged (not
+    // while NVIDIA's frame generation runs: its licence keeps performance
+    // data of it out of what users send to others, and this log is sent).
+    void frame_end(bool timings) {
+        if (!device_ || !offered_) return;
+        watch(qpc_seconds());
+        if (active_) {
+            const double before = qpc_seconds();
+            nv_.sleep(device_);
+            const double waited = qpc_seconds() - before;
+            waited_sum_ += waited;
+            waited_max_ = std::max(waited_max_, waited);
+            ++waited_n_;
+        }
+        if (!marking() || !g_settings.log_stats) return;
+        const double now = qpc_seconds();
+        if (next_log_ == 0) next_log_ = now + 5.0;
+        if (now < next_log_) return;
+        next_log_ = now + 5.0;
+        glasir::NvLowLatency::Status status;
+        const bool known = nv_.status(device_, status);
+        char timed[160] = "";
+        glasir::NvLowLatency::Report report;
+        if (timings && nv_.report(device_, report))
+            snprintf(timed, sizeof(timed),
+                     " | the driver's timings of %d frames: %.2f ms in the queue, %.2f ms on the GPU, %.2f ms from "
+                     "mpv's present to drawn",
+                     report.frames, report.queue_ms, report.gpu_ms, report.total_ms);
+        char arrival[96] = "";
+        if (arrival_n_ > 0)
+            snprintf(arrival, sizeof(arrival), " | a new frame is at mpv's present %.2f ms after it arrives",
+                     arrival_sum_ / arrival_n_ * 1000.0);
+        // G-SYNC as the driver has it for mpv's window now (it only says
+        // while the window is in front).
+        char sync[64] = "";
+        if (known)
+            snprintf(sync, sizeof(sync), ", G-SYNC %s, %s", status.vrr ? "on" : "off",
+                     status.direct_flip ? "flipped straight to the screen" : "composed");
+        const double n = waited_n_ ? double(waited_n_) : 1.0;
+        log_line(reshade::log::level::info,
+                 "NVIDIA Reflex %s: the driver says low latency mode is %s%s | it waited %.3f ms avg, %.3f max after "
+                 "each of %u frames%s%s",
+                 name(), !known ? "unknown" : status.low_latency ? "on" : "off", sync, waited_sum_ / n * 1000.0,
+                 waited_max_ * 1000.0, waited_n_, arrival, timed);
+        waited_sum_ = waited_max_ = arrival_sum_ = 0;
+        waited_n_ = arrival_n_ = 0;
+    }
+
+private:
+    // Once a second: G-SYNC as the driver has it for mpv's window (it only says while the window is in
+    // front). The first time it runs is kept (GsyncSeen), and mpv's scaling script is told that it runs
+    // on this PC: the driver keeps G-SYNC off on a device RTX Video Super Resolution has run on, and the
+    // script makes mpv's output anew when that scaling is left - only where there is G-SYNC to get back.
+    void watch(double now) {
+        if (now < next_watch_) return;
+        next_watch_ = now + 1.0;
+        glasir::NvLowLatency::Status status;
+        if (!nv_.status(device_, status)) {
+            gsync_ = composed_ = -1;
+            return;
+        }
+        composed_ = status.direct_flip ? 0 : 1;
+        if (status.vrr != (gsync_ == 1))
+            log_line(reshade::log::level::info, "G-SYNC %s for mpv's window (the NVIDIA driver says)", status.vrr ? "on" : "off");
+        gsync_ = status.vrr ? 1 : 0;
+        if (status.vrr && !g_settings.gsync_seen) {
+            g_settings.gsync_seen = true;
+            reshade::set_config_value(nullptr, kSection, "GsyncSeen", "1");
+        }
+        if (g_settings.gsync_seen && !told_ && glasir::overlay::mpv_connected()) {
+            glasir::overlay::mpv_command({"set", "user-data/glasir/gsync", "yes"});
+            told_ = true;
+        }
+    }
+    static const char *name() { return g_settings.low_latency >= 2 ? "boost" : g_settings.low_latency == 1 ? "on" : "off"; }
+    bool marking() const { return device_ && offered_ && (active_ || measure_); }
+    void apply() {
+        const int mode = g_settings.low_latency;
+        const int status = nv_.set_mode(device_, mode > 0, mode == 2);
+        if (status != 0)
+            log_line(reshade::log::level::warning,
+                     "NVIDIA Reflex: the driver did not take low latency mode %s (NVAPI status %d)", name(), status);
+        else
+            log_line(reshade::log::level::info, "NVIDIA Reflex: low latency mode %s",
+                     mode == 2 ? "on, with boost" : mode == 1 ? "on" : "off");
+        active_ = status == 0 && mode > 0;
+        next_log_ = 0;
+        waited_sum_ = waited_max_ = arrival_sum_ = 0;
+        waited_n_ = arrival_n_ = 0;
+    }
+
+    glasir::NvLowLatency nv_;
+    ID3D11Device *device_ = nullptr;  // mpv's, which FrameGen holds
+    bool offered_ = false;            // the driver has the mode for this device
+    bool active_ = false;             // it was asked for and taken
+    bool measure_ = false;            // GLASIR_LATENCY_LOG
+    uint64_t frame_ = 0;
+    int stage_ = 0;  // of the frame being presented: 1 = started, 2 = everything drawn
+    double next_log_ = 0, waited_sum_ = 0, waited_max_ = 0;
+    unsigned waited_n_ = 0;
+    LONG64 published_ = -1;  // the link's new-frame count at the last present
+    double next_watch_ = 0;
+    int gsync_ = -1;     // as last read: 1 on, 0 off, -1 the driver did not say
+    int composed_ = -1;  // likewise: 1 Windows composes the window, 0 its frames go straight to the screen
+    bool told_ = false;  // mpv has user-data/glasir/gsync (it keeps it for as long as it runs)
+    double arrival_sum_ = 0;
+    unsigned arrival_n_ = 0;
+};
+
+LowLatency g_latency;
+
+// When NVIDIA's software (Video Frame Generation, Video Super Resolution) last
+// drew, and mpv's presents since. The driver's timings in the log are of the
+// last 64 frames, and its licence keeps timings of its software out of what
+// users send to others: they are left out until 64 frames and 5 s have gone
+// by without it (a still picture presents only a few frames a second).
+double g_nvidia_ran_at = -1e9;
+unsigned g_presents_since_nvidia = ~0u;
+void nvidia_ran() {
+    g_nvidia_ran_at = qpc_seconds();
+    g_presents_since_nvidia = 0;
+}
+bool nvidia_ran_lately() { return g_presents_since_nvidia < 64 || qpc_seconds() - g_nvidia_ran_at < 5.0; }
+
+// ---- NVIDIA Super Resolution ---------------------------------------------------
+//
+// video.scaling = nvidia: the capture is made as large as its place in the
+// window by NVIDIA's Video Super Resolution (fg_sr.h), here, before ReShade's
+// effects (DLSS 5) and frame generation - not by mpv.
+//
+// mpv has no place for it: its filters cannot run the SDK, and its own way to
+// NVIDIA's super resolution (the GPU's video processor, video.scaling = vsr)
+// has no choice of model and costs G-SYNC. So glasir_scaling.lua has mpv
+// draw the picture as large as it comes, in the middle of the window
+// (video-unscaled), and says so (user-data/glasir/sr). At mpv's present the
+// back buffer then holds that small picture: it is copied out, made as large
+// as fits the window, and drawn over the middle. Everything after that - the
+// effects, the frame in between, the menu, a screenshot - finds a picture as
+// large as mpv would have made it, and is told where it is
+// (overlay::set_scaled_picture).
+//
+// "Scale to" (glasir.ini video.scale_to, user-data/glasir/target) is the size
+// the effect makes the picture, whatever the window's: its picture then goes
+// into a texture of that size, and fg_resample.h takes it from there to its
+// place - down from a larger one (supersampling), up from a smaller one. So
+// too where its place is more than the four times the effect goes to.
+//
+// The script is told whether this can be done at all ("script-message
+// glasir-sr ready" or "unavailable"): until it hears "ready", and where it
+// cannot be, FSR 1 scales in mpv as before. The effect is made (its model
+// loaded) while FSR 1 still scales, from the sizes mpv reports, and "ready"
+// is said only once it is there: no small picture while it loads, and none
+// where it cannot run. A failure is for those sizes and that format: another
+// size (the window resized, another Scale to) tries again.
+//
+// NVIDIA's licence keeps results of its software out of what users send to
+// others: nothing here logs how long a frame took.
+const char *sr_quality_name(fg::SrLevel level) {
+    return level == fg::SrLevel::low ? "low" : level == fg::SrLevel::high ? "high" : level == fg::SrLevel::ultra ? "ultra" : "medium";
+}
+
+class Upscale {
+    // The sizes and format one effect and its textures are made for.
+    struct Key {
+        UINT in_w = 0, in_h = 0, sr_w = 0, sr_h = 0;
+        DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+        bool direct = false;
+        bool operator==(const Key &o) const {
+            return in_w == o.in_w && in_h == o.in_h && sr_w == o.sr_w && sr_h == o.sr_h && format == o.format &&
+                   direct == o.direct;
+        }
+    };
+
+public:
+    // mpv's present on its swap chain, before ReShade's effects.
+    void on_present(reshade::api::swapchain *api_swapchain) {
+        const glasir::overlay::Shown shown = glasir::overlay::shown();
+        if (!shown.connected) return;
+        if (shown.scaling != "nvidia") {
+            if (wanted_) {  // the scaling was switched: its memory is the next one's
+                wanted_ = false;
+                told_ = 0;
+                failed_ = Key{};
+                mismatch_ = 0;
+                sr_.release();
+                let_go();
+                glasir::overlay::set_scaled_picture(nullptr);
+                running_ = false;
+            }
+            return;
+        }
+        wanted_ = true;
+        reshade::api::device *api_device = api_swapchain->get_device();
+        if (api_device->get_api() != reshade::api::device_api::d3d11) return tell(false, "mpv does not draw with Direct3D 11");
+        auto *swapchain = reinterpret_cast<IDXGISwapChain *>(api_swapchain->get_native());
+        auto *device = reinterpret_cast<ID3D11Device *>(api_device->get_native());
+        if (!swapchain || !device) return;
+        if (device != device_) {  // another device than the one all this was made on
+            if (device_) release();
+            device_ = device;
+        }
+        if (!installed_checked_) {
+            installed_checked_ = true;
+            installed_ = fg::Sr::runtime_present(vfg_runtime_folder());
+        }
+        if (!installed_) return tell(false, "it is not downloaded");
+
+        running_ = false;
+        glasir::overlay::set_scaled_picture(nullptr);
+        if (shown.video_w < 16 || shown.video_h < 16) return;
+        ComPtr<ID3D11Texture2D> back_buffer;
+        D3D11_TEXTURE2D_DESC bb{};
+        if (FAILED(swapchain->GetBuffer(0, IID_PPV_ARGS(&back_buffer)))) return;
+        back_buffer->GetDesc(&bb);
+        if (bb.SampleDesc.Count != 1) return;
+        // The picture as it comes, from mpv; drawn as it comes it must fit the window whole (else the
+        // script leaves the scaling to mpv).
+        const UINT in_w = UINT(shown.video_w), in_h = UINT(shown.video_h);
+        if (in_w > bb.Width || in_h > bb.Height) return;
+        // Its place: as large as fits the window.
+        const double fit = std::min(double(bb.Width) / in_w, double(bb.Height) / in_h);
+        const UINT out_w = std::min(bb.Width, UINT(std::lround(in_w * fit)));
+        const UINT out_h = std::min(bb.Height, UINT(std::lround(in_h * fit)));
+        const UINT x = (bb.Width - out_w) / 2, y = (bb.Height - out_h) / 2;
+        // What the effect makes: the target's size (as glasir_scaling.lua counts it), or its place; up
+        // to the four times it goes to.
+        UINT sr_w = out_w, sr_h = out_h;
+        if (shown.target > 0) {
+            sr_h = UINT(in_h * std::min(double(shown.target) / in_h, 4.0) / 2) * 2;
+            sr_w = UINT(in_w * (double(sr_h) / in_h) / 2 + 0.5) * 2;
+        } else if (fit > 4.0) {
+            sr_w = in_w * 4;
+            sr_h = in_h * 4;
+        }
+        // Nothing to make larger: the script has mpv scale again in a moment.
+        if (sr_h <= in_h * 1.001) return;
+        const bool direct = sr_w == out_w && sr_h == out_h;
+        const Key key{in_w, in_h, sr_w, sr_h, bb.Format, direct};
+        if (key == failed_) return;  // said when it failed; another size tries again
+        bool ten_bit = false;
+        if (!fg::Sr::takes(bb.Format, ten_bit)) return fail(key, "it does not take this picture format");
+
+        ComPtr<ID3D11DeviceContext> ctx;
+        device->GetImmediateContext(&ctx);
+        std::string error;
+        if (!sr_.ready() || sr_.in_width() != in_w || sr_.in_height() != in_h || sr_.out_width() != sr_w ||
+            sr_.out_height() != sr_h || sr_.ten_bit() != ten_bit || format_ != bb.Format || direct != !made_) {
+            let_go();
+            D3D11_TEXTURE2D_DESC d{};
+            d.Width = in_w;
+            d.Height = in_h;
+            d.MipLevels = d.ArraySize = 1;
+            d.Format = bb.Format;
+            d.SampleDesc.Count = 1;
+            d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            if (FAILED(device->CreateTexture2D(&d, nullptr, &copy_)) ||
+                FAILED(device->CreateShaderResourceView(copy_.Get(), nullptr, &copy_view_)))
+                return fail(key, "no texture for the picture");
+            if (!direct) {
+                // The effect's picture at its own size, before it is taken to its place.
+                d.Width = sr_w;
+                d.Height = sr_h;
+                d.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+                if (FAILED(device->CreateTexture2D(&d, nullptr, &made_)) ||
+                    FAILED(device->CreateShaderResourceView(made_.Get(), nullptr, &made_view_)) ||
+                    FAILED(device->CreateRenderTargetView(made_.Get(), nullptr, &made_target_)))
+                    return fail(key, "no texture for the larger picture");
+                if (!to_place_.ready() && !to_place_.create(device, error)) return fail(key, error.c_str());
+            }
+            if (!sr_.create(device, in_w, in_h, sr_w, sr_h, ten_bit, vfg_runtime_folder(), g_settings.sr_level, error))
+                return fail(key, error.c_str());
+            format_ = bb.Format;
+            char then[64] = "";
+            if (!direct) snprintf(then, sizeof(then), ", then %ux%u for its place", out_w, out_h);
+            log_line(reshade::log::level::info,
+                     "NVIDIA Video Super Resolution %s: the %ux%u picture is made %ux%u%s (quality %s, %d-bit)",
+                     sr_.version().c_str(), in_w, in_h, sr_w, sr_h, then, sr_quality_name(g_settings.sr_level),
+                     ten_bit ? 10 : 8);
+        }
+        // The effect is there: the script may have mpv draw the picture as it comes.
+        tell(true, nullptr);
+        if (!shown.unscaled) {  // mpv still scales it (until the script has heard)
+            mismatch_ = 0;
+            return;
+        }
+        // Where mpv drew it, as it comes: its box, a pixel or two off at most (mpv's margins are
+        // rounded); else mpv is not there yet, or no longer.
+        const D3D11_BOX box = glasir::overlay::mpv_picture_box(bb.Width, bb.Height);
+        const int dw = int(box.right - box.left) - int(in_w), dh = int(box.bottom - box.top) - int(in_h);
+        if (std::abs(dw) > 2 || std::abs(dh) > 2) {
+            // For two seconds on end: mpv draws it somewhere else than expected, and keeps doing so.
+            if (++mismatch_ >= 120) fail(key, "mpv's picture is not where it was expected");
+            return;
+        }
+        mismatch_ = 0;
+        const UINT left = std::min(box.left, bb.Width - in_w), top = std::min(box.top, bb.Height - in_h);
+        const D3D11_BOX from{left, top, 0, left + in_w, top + in_h, 1};
+        ComPtr<ID3D11RenderTargetView> target;
+        if (FAILED(device->CreateRenderTargetView(back_buffer.Get(), nullptr, &target)))
+            return fail(key, "no view of mpv's frame");
+        ctx->CopySubresourceRegion(copy_.Get(), 0, 0, 0, 0, back_buffer.Get(), 0, &from);
+        {
+            StateBackup backup(ctx.Get());
+            if (direct) {
+                if (!sr_.draw(ctx.Get(), copy_view_.Get(), target.Get(), x, y, error)) return fail(key, error.c_str());
+            } else {
+                if (!sr_.draw(ctx.Get(), copy_view_.Get(), made_target_.Get(), 0, 0, error))
+                    return fail(key, error.c_str());
+                to_place_.draw(ctx.Get(), made_view_.Get(), sr_w, sr_h, target.Get(), x, y, out_w, out_h);
+            }
+        }
+        const D3D11_BOX to{x, y, 0, x + out_w, y + out_h, 1};
+        glasir::overlay::set_scaled_picture(&to);
+        running_ = true;
+        nvidia_ran();
+    }
+
+    // mpv's swap chain is going: what was made on its device goes with it.
+    void release() {
+        sr_.release();
+        let_go();
+        to_place_.release();
+        format_ = DXGI_FORMAT_UNKNOWN;
+        running_ = false;
+        told_ = 0;          // the script is told again on the next device
+        failed_ = Key{};    // and it is tried again there
+        mismatch_ = 0;
+        device_ = nullptr;
+        glasir::overlay::set_scaled_picture(nullptr);
+    }
+
+    // For the menu: the model (0 low .. 3 ultra), and whether it runs.
+    int level() const { return int(g_settings.sr_level) - int(fg::SrLevel::low); }
+    void set_level(int level) {
+        g_settings.sr_level = fg::SrLevel(int(fg::SrLevel::low) + std::clamp(level, 0, 3));
+        reshade::set_config_value(nullptr, kSection, "SrQuality", sr_quality_name(g_settings.sr_level));
+        sr_.set_level(g_settings.sr_level);
+        log_line(reshade::log::level::info, "SrQuality=%s (from the menu)", sr_quality_name(g_settings.sr_level));
+    }
+    int state() const { return running_ ? 1 : (wanted_ && told_ < 0 ? -1 : 0); }
+
+private:
+    // Tells glasir_scaling.lua, once for each change, whether the picture can be scaled here.
+    void tell(bool ready, const char *why) {
+        const int now = ready ? 1 : -1;
+        if (told_ == now) return;
+        told_ = now;
+        glasir::overlay::mpv_command({"script-message", "glasir-sr", ready ? "ready" : "unavailable"});
+        if (!ready) {
+            glasir::overlay::set_scaled_picture(nullptr);
+            running_ = false;
+            if (why)
+                log_line(reshade::log::level::warning,
+                         "NVIDIA Video Super Resolution cannot scale the picture (%s); FSR 1 does, in mpv", why);
+        }
+    }
+    // It cannot be done at these sizes and this format: FSR 1 scales until they change.
+    void fail(const Key &key, const char *why) {
+        failed_ = key;
+        mismatch_ = 0;
+        sr_.release();
+        let_go();
+        if (told_ < 0)  // already said: this is another size that cannot be done either
+            log_line(reshade::log::level::warning, "NVIDIA Video Super Resolution cannot scale the picture (%s)", why);
+        tell(false, why);
+    }
+    // The textures of one size.
+    void let_go() {
+        copy_.Reset();
+        copy_view_.Reset();
+        made_.Reset();
+        made_view_.Reset();
+        made_target_.Reset();
+    }
+
+    fg::Sr sr_;
+    fg::Resample to_place_;         // the effect's picture to its place, where the two differ in size
+    ComPtr<ID3D11Texture2D> copy_;  // the picture as mpv drew it
+    ComPtr<ID3D11ShaderResourceView> copy_view_;
+    ComPtr<ID3D11Texture2D> made_;  // the effect's picture, where it is not drawn straight into its place
+    ComPtr<ID3D11ShaderResourceView> made_view_;
+    ComPtr<ID3D11RenderTargetView> made_target_;
+    DXGI_FORMAT format_ = DXGI_FORMAT_UNKNOWN;
+    bool wanted_ = false;             // the scaling chosen is this one
+    bool installed_checked_ = false, installed_ = false;
+    Key failed_;                      // it failed at these: not again until they change
+    int mismatch_ = 0;                // frames on end where mpv's picture was not where expected
+    ID3D11Device *device_ = nullptr;  // what all this was made on (not held)
+    bool running_ = false;            // the frame being presented was scaled here
+    int told_ = 0;                    // what the script was last told: 1 ready, -1 unavailable, 0 nothing yet
+};
+
+Upscale g_upscale;
+
 // How a real frame B reaches the screen with a frame in between:
 //
 //   reshade_present  B is finished in the back buffer (the DLSS 5 pass ran
@@ -1325,7 +1857,7 @@ public:
     void set_vfg(bool on);
     // 2, 3 or 4 frames for each of the source's (the menu).
     void set_multiplier(int frames);
-    void set_vfg_mode(fg::VfgMode mode);
+    void set_vfg_quality(int quality);
     void set_history_search(bool on);
     void set_picture_only(bool on);
     void set_edge_rules(bool on);
@@ -1352,7 +1884,13 @@ public:
         if (mpv_swapchain_ && swapchain->get_native() != mpv_swapchain_) return;
         mpv_presented_ = qpc_seconds();
         presented_color_space_ = swapchain->get_color_space();
+        g_latency.frame_start();
+        if (mpv_swapchain_) g_upscale.on_present(swapchain);  // mpv's own, once it is known
     }
+    // This native swap chain is mpv's (known from its first reshade_present on).
+    bool is_mpv(uint64_t native) const { return mpv_swapchain_ != 0 && native == mpv_swapchain_; }
+    // NVIDIA's filter is making the frames in between.
+    bool vfg_running() const { return g_settings.vfg && vfg_state() > 0; }
 
     bool owns(reshade::api::device *device) const {
         return device_ && device->get_api() == reshade::api::device_api::d3d11 &&
@@ -1369,6 +1907,7 @@ public:
         vfg_.release();
         vfg_failed_ = vfg_broken_ = false;
         hold_.stop();
+        g_latency.stop();
         context_.Reset();
         device_.Reset();
         reset_history();
@@ -1387,6 +1926,7 @@ private:
     bool ensure_frames(const D3D11_TEXTURE2D_DESC &bb);
     void follow_picture(const D3D11_TEXTURE2D_DESC &bb);
     bool use_vfg();
+    bool take_vfg_mode(const char *why);
     bool draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool follows, bool keep, int index, int frames);
     // Multiplier, or the most frames for each of the source's that the
     // display can show; 1: not even two.
@@ -1598,6 +2138,12 @@ private:
     double late_max_ = 0, late_sum_ = 0, mpv_present_max_ = 0, mpv_present_sum_ = 0;
     double out_max_ = 0;  // the real frame's copy and present on mpv's thread, held
     unsigned vfg_generated_ = 0;  // frames in between that NVIDIA's filter made
+    // VfgQuality=auto: the choice of model, and how long the last pair took - from its real frame's
+    // arrival at Glasir until its frames in between were drawn (-1: it had none).
+    fg::VfgAuto vfg_pick_;
+    double vfg_busy_ = -1;
+    bool vfg_use_failed_ = false;  // a model could not be made: said once
+    int vfg_pick_frames_ = 0;      // the frames a pair had while vfg_pick_ learned (0: none yet)
 };
 
 FrameGen g_gen;
@@ -1614,6 +2160,7 @@ bool FrameGen::init(ID3D11Device *device) {
     log_line(reshade::log::level::info, "ready: feature level 0x%X, %s, toggle key %d%s", device->GetFeatureLevel(),
              g_settings.enabled ? "on" : "off", g_settings.toggle_key,
              g_settings.require_dedup ? ", waiting for the link from Glasir's dedup" : "");
+    g_latency.start(device);
     return true;
 }
 
@@ -1751,11 +2298,13 @@ bool FrameGen::use_vfg() {
                          g_settings.vfg_auto_cut, error, picture_made_)) {
         vfg_format_ = format_;
         vfg_failed_ = false;
+        vfg_pick_.reset(g_settings.vfg_mode);  // what a model takes is another matter at another size
+        vfg_busy_ = -1;
         const fg::Picture &p = picture_made_;
         log_line(reshade::log::level::info,
-                 "Method=vfg: NVIDIA Video Frame Generation %s makes the frames in between (quality %s, %ux%u, %d-bit)",
-                 vfg_.version().c_str(), vfg_quality_name(), p.x1 ? p.x1 - p.x0 : width_, p.x1 ? p.y1 - p.y0 : height_,
-                 ten_bit ? 10 : 8);
+                 "Method=vfg: NVIDIA Video Frame Generation %s makes the frames in between (quality %s%s, %ux%u, %d-bit)",
+                 vfg_.version().c_str(), g_settings.vfg_auto ? "auto, to begin with " : "", vfg_mode_name(),
+                 p.x1 ? p.x1 - p.x0 : width_, p.x1 ? p.y1 - p.y0 : height_, ten_bit ? 10 : 8);
         return true;
     }
     vfg_failed_ = true;
@@ -1793,8 +2342,18 @@ bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool fol
     StateBackup backup(context_.Get());
     if (use_vfg()) {
         std::string error;
+        const double before = qpc_seconds();
         if (vfg_.draw(context_.Get(), views_[a].Get(), views_[b].Get(), rtv.Get(), o, error)) {
             ++vfg_generated_;
+            nvidia_ran();
+            // For VfgQuality=auto: the pair's first frame in between is done this long after its real
+            // frame arrived (the filter's call returns when it is done, the DLSS 5 pass before it too);
+            // the pair's other frames add their own time.
+            const double took = qpc_seconds() - before;
+            if (index <= 1)
+                vfg_busy_ = std::max(arrival_to_present_, 0.0) + std::max(effects_, 0.0) + took;
+            else if (vfg_busy_ >= 0)
+                vfg_busy_ += took;
             // GLASIR_VFG_PROFILE=1 (a developer's look, never in a user's log): where the calling
             // thread's time went, averaged over 150 frames in between.
             if (vfg_profile_ < 0) vfg_profile_ = GetEnvironmentVariableW(L"GLASIR_VFG_PROFILE", nullptr, 0) > 0 ? 1 : 0;
@@ -1803,8 +2362,9 @@ bool FrameGen::draw_between(ID3D11Texture2D *back_buffer, int a, int b, bool fol
                 if (++vfg_stage_n_ == 150) {
                     log_line(reshade::log::level::info,
                              "GLASIR_VFG_PROFILE: per frame in between, waiting for the buffers %.2f ms, the filter %.2f ms, "
-                             "handing them back %.2f ms",
-                             vfg_stage_sum_[0] / 150, vfg_stage_sum_[1] / 150, vfg_stage_sum_[2] / 150);
+                             "handing them back %.2f ms | model %s, the last pair %.2f ms from arrival to drawn, of %.2f",
+                             vfg_stage_sum_[0] / 150, vfg_stage_sum_[1] / 150, vfg_stage_sum_[2] / 150, vfg_mode_name(),
+                             vfg_busy_ * 1000.0, interval_ * 1000.0);
                     vfg_stage_sum_[0] = vfg_stage_sum_[1] = vfg_stage_sum_[2] = 0;
                     vfg_stage_n_ = 0;
                 }
@@ -1906,16 +2466,50 @@ void FrameGen::set_vfg(bool on) {
     log_line(reshade::log::level::info, "Method=%s (from the menu)", on ? "vfg" : "motion");
 }
 
-// The filter loads one model: it is made anew with the other at the next
-// frame in between.
-void FrameGen::set_vfg_mode(fg::VfgMode mode) {
-    if (mode == g_settings.vfg_mode) return;
+// From the menu: 0 low, 1 medium, 2 high - that model from the next frame in
+// between on, the others let go - or 3, auto: the add-on picks from here on,
+// starting with the one in use.
+void FrameGen::set_vfg_quality(int quality) {
+    const bool pick = quality >= 3;
+    const fg::VfgMode mode =
+        pick ? g_settings.vfg_mode : quality <= 0 ? fg::VfgMode::low : quality >= 2 ? fg::VfgMode::high : fg::VfgMode::medium;
+    if (pick == g_settings.vfg_auto && mode == g_settings.vfg_mode) return;
+    g_settings.vfg_auto = pick;
     g_settings.vfg_mode = mode;
     reshade::set_config_value(nullptr, kSection, "VfgQuality", vfg_quality_name());
-    vfg_.release();
+    vfg_pick_.reset(mode);
+    vfg_busy_ = -1;
+    vfg_use_failed_ = false;
+    std::string error;
+    // One that cannot be had this way is made anew, with the reason said there if it fails again.
+    if (vfg_.ready() && !vfg_.use(mode, pick, error)) vfg_.release();
     vfg_failed_ = false;
     retry_now();
     log_line(reshade::log::level::info, "VfgQuality=%s (from the menu)", vfg_quality_name());
+}
+
+// VfgQuality=auto: vfg_pick_ has chosen another model. Its filter is made the
+// first time (a moment's stop) and kept, so the next change to it costs
+// nothing. NVIDIA's licence keeps timings of its software out of what users
+// send to others: the line says why in words.
+// False: it could not be made, and the one in use goes on.
+bool FrameGen::take_vfg_mode(const char *why) {
+    const fg::VfgMode want = vfg_pick_.mode();
+    std::string error;
+    if (vfg_.ready() && !vfg_.use(want, true, error)) {
+        vfg_pick_.failed(vfg_.mode());
+        if (!vfg_use_failed_)
+            log_line(reshade::log::level::warning, "VfgQuality=auto: another model could not be made (%s); it stays at %s",
+                     error.c_str(), vfg_mode_name());
+        vfg_use_failed_ = true;
+        return false;
+    }
+    g_settings.vfg_mode = want;
+    vfg_busy_ = -1;
+    vfg_stage_n_ = 0;  // GLASIR_VFG_PROFILE: this model's frames from here
+    vfg_stage_sum_[0] = vfg_stage_sum_[1] = vfg_stage_sum_[2] = 0;
+    log_line(reshade::log::level::info, "VfgQuality=auto: %s now (%s)", vfg_mode_name(), why);
+    return true;
 }
 
 // From the panel. A check (DebugMarker, LogStats) is kept in ReShade.ini as
@@ -1989,6 +2583,13 @@ void FrameGen::watch_drops(double now, bool stalled) {
     drop_times_[0] = drop_times_[1];
     drop_times_[1] = now;
     if (fresh < 2 && now - drop_times_[0] > 2.0) return;
+    // VfgQuality=auto: a smaller model first, where there is one.
+    if (g_settings.vfg_auto && vfg_running() && vfg_pick_.dropped(now, interval_, neural_now_) &&
+        take_vfg_mode("mpv dropped new frames while generating")) {
+        drop_times_[0] = drop_times_[1] = -1e9;
+        settle_until_ = now + 0.5;
+        return;
+    }
     // At 3x and 4x, fewer frames first: 2x may well hold where they do not.
     if (pending_frames_ > 2) {
         fewer_frames(pending_frames_, now, "mpv dropped new frames while generating");
@@ -2160,10 +2761,30 @@ void FrameGen::on_reshade_present(reshade::api::effect_runtime *runtime) {
         // its first one too late for the others to fit (DLSS 5 takes most of the interval). Every other
         // real frame then gets none - three frames and a long one, which looks worse than 2x. After a few
         // of these the rate goes down by one, to what holds steady.
-        if (frames > 2 && (strain_ += 3) >= 18)
+        // VfgQuality=auto takes a smaller model first (below), while there is one.
+        const bool smaller_first = g_settings.vfg_auto && vfg_running() && vfg_pick_.has_smaller();
+        if (frames > 2 && !smaller_first && (strain_ += 3) >= 18)
             fewer_frames(frames, now, "frames were still queued when the next real frame came");
     } else if (generate && strain_ > 0) {
         --strain_;
+    }
+    // VfgQuality=auto: how the pair before went, and whether this one is left without its frame because
+    // the screen is behind.
+    if (g_settings.vfg_auto && vfg_running() && prev_ >= 0 && interval_ > 0 && !source_paused) {
+        const bool behind = !generate && queued >= 2;
+        // What a pair takes is for one number of frames in between: another (2x, 3x, 4x, or fewer for a
+        // while) starts over.
+        if (generate && frames != vfg_pick_frames_) {
+            if (vfg_pick_frames_ > 0) {
+                vfg_pick_.reset(g_settings.vfg_mode);
+                vfg_busy_ = -1;
+            }
+            vfg_pick_frames_ = frames;
+        }
+        if (vfg_pick_.frame(now, interval_, vfg_busy_, behind, neural))
+            take_vfg_mode(vfg_pick_.why() == fg::VfgAuto::Why::room ? "there is time to spare"
+                                                                     : "the frames in between were not keeping up");
+        vfg_busy_ = -1;
     }
     // How many frames in between a real frame gets lately, for the menu (3x and 4x that fall short).
     if (prev_ >= 0 && interval_ > 0 && !source_paused) {
@@ -2371,6 +2992,23 @@ void FrameGen::stats(double now) {
     vfg_generated_ = 0;
 }
 
+// ---- The foreground across a new window ---------------------------------------
+//
+// When mpv makes its output anew while playing (glasir_scaling.lua, leaving
+// NVIDIA's super resolution), its window is a new one too. Windows hands the
+// foreground to some other program the moment the old one goes, and a window
+// that is not in front gets no keys and no G-SYNC - the very thing the new
+// output was made for (seen 11-19: the browser was in front afterwards). mpv
+// brings its new window to the front itself, but a process that is not in
+// front is refused. So while mpv's window is still in front and its swap
+// chain goes, mpv's process is given leave to do so later. (ReShade loads its
+// add-ons anew with the new device: nothing kept here would outlive it.)
+void keep_foreground() {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    if (pid == GetCurrentProcessId()) AllowSetForegroundWindow(GetCurrentProcessId());
+}
+
 // ---- ReShade events -----------------------------------------------------------
 
 void on_reshade_present(reshade::api::effect_runtime *runtime) {
@@ -2379,10 +3017,17 @@ void on_reshade_present(reshade::api::effect_runtime *runtime) {
     g_gen.on_reshade_present(runtime);
     // The menu last: over the frame in between (or the frame) mpv presents now.
     glasir::overlay::on_reshade_present(runtime);
+    if (g_gen.is_mpv(runtime->get_native())) g_latency.before_present();
 }
 
 void on_finish_present(reshade::api::command_queue *, reshade::api::swapchain *swapchain) {
-    g_gen.on_finish_present(swapchain);
+    const bool mpv = g_gen.is_mpv(swapchain->get_native());
+    if (mpv) g_latency.presented();
+    g_gen.on_finish_present(swapchain);  // the frames after the one mpv presented
+    if (mpv) {
+        if (g_presents_since_nvidia < ~0u) ++g_presents_since_nvidia;
+        g_latency.frame_end(!nvidia_ran_lately());
+    }
 }
 
 void on_finish_effects(reshade::api::effect_runtime *runtime, reshade::api::command_list *, reshade::api::resource_view,
@@ -2439,7 +3084,8 @@ void draw_panel(reshade::api::effect_runtime *) {
     if (g_settings.vfg && g_gen.ready() && g_settings.enabled) {
         const int state = g_gen.vfg_state();
         if (state > 0)
-            snprintf(line, sizeof(line), "Frames in between by NVIDIA Video Frame Generation (quality %s).", vfg_quality_name());
+            snprintf(line, sizeof(line), "Frames in between by NVIDIA Video Frame Generation (quality %s%s%s).",
+                     vfg_quality_name(), g_settings.vfg_auto ? ": " : "", g_settings.vfg_auto ? vfg_mode_name() : "");
         else if (state < 0)
             snprintf(line, sizeof(line), "NVIDIA Video Frame Generation could not run (see ReShade.log): Glasir's own makes the frames.");
         else
@@ -2522,15 +3168,23 @@ void on_init_effect_runtime(reshade::api::effect_runtime *) {
 // add-ons make for themselves.
 void on_destroy_swapchain(reshade::api::swapchain *swapchain, bool resize) {
     if (!g_gen.owns(swapchain->get_device())) return;
-    if (resize)
+    if (resize) {
         g_gen.release_held();  // ResizeBuffers would wait for the held present
-    else
+    } else {
+        keep_foreground();  // mpv is closing, or making its output anew
+        // The menu is made on this device too. (destroy_device comes after this, when owns()
+        // no longer says so: without this the menu stayed on a device that was gone, and
+        // dead on the one after it.)
+        glasir::overlay::release();
+        g_upscale.release();
         g_gen.release();
+    }
 }
 
 void on_destroy_device(reshade::api::device *device) {
     if (!g_gen.owns(device)) return;
     glasir::overlay::release();
+    g_upscale.release();
     g_gen.release();
 }
 
@@ -2550,15 +3204,25 @@ void set_menu_host() {
     };
     host.framegen_nvidia = [] { return g_settings.vfg; };
     host.set_framegen_nvidia = [](bool on) { g_gen.set_vfg(on); };
-    host.nvidia_quality = [] { return int(g_settings.vfg_mode); };
+    host.nvidia_quality = [] { return g_settings.vfg_auto ? 3 : int(g_settings.vfg_mode); };
+    host.nvidia_quality_now = [] { return int(g_settings.vfg_mode); };
     host.set_nvidia_quality = [](int quality) {
-        g_gen.set_vfg_mode(quality <= 0 ? fg::VfgMode::low : quality >= 2 ? fg::VfgMode::high : fg::VfgMode::medium);
+        g_gen.set_vfg_quality(quality);
     };
     host.nvidia_state = [] { return g_gen.vfg_state(); };
     host.rates = [](double &source, double &real, double &generated) { g_gen.rates(source, real, generated); };
     host.framegen_status = [] { return g_gen.status(); };
+    host.low_latency = [] { return g_latency.mode(); };
+    host.set_low_latency = [](int mode) { g_latency.set(mode); };
+    host.gsync = [] { return g_latency.gsync(); };
+    host.composed = [] { return g_latency.composed(); };
     host.mpv_pipe = g_settings.mpv_pipe;
     glasir::overlay::set_host(host);
+    glasir::overlay::ScalerHost scaler;
+    scaler.level = [] { return g_upscale.level(); };
+    scaler.set_level = [](int level) { g_upscale.set_level(level); };
+    scaler.state = [] { return g_upscale.state(); };
+    glasir::overlay::set_scaler_host(scaler);
 }
 
 bool g_panel = false;

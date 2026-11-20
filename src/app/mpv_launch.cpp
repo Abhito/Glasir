@@ -106,6 +106,7 @@ std::vector<std::wstring> mpv_arguments(const MpvPlan &plan, const Settings &s) 
         a.push_back(L"--script-opts-append=glasir_scaling-" + key + L"=" + value);
     };
     scaling(L"mode", scaling_name(s.scaling));
+    scaling(L"target", std::to_wstring(s.scale_to));
     scaling(L"vsr", plan.vsr);
     scaling(L"hdr", s.hdr ? L"yes" : L"no");
     scaling(L"rtx_hdr", plan.rtx_hdr && !s.hdr ? L"yes" : L"no");

@@ -33,8 +33,20 @@ struct Settings {
     bool sdr_full_range = false;
     int hdr_peak_nits = 1000;
     // How the capture is scaled up to the window (glasir_scaling.lua).
-    enum class Scaling { Mpv, Fsr, Vsr, Cnn, Anime4k };
+    enum class Scaling { Mpv, Fsr, Vsr, Cnn, Anime4k, Nvidia };
     Scaling scaling = Scaling::Mpv;
+    // scaling = nvidia: the model of NVIDIA's Video Super Resolution, 0 low,
+    // 1 medium, 2 high, 3 ultra (the add-on's SrQuality).
+    int scaling_quality = 1;
+    // scale_to: the height in lines the scaler makes the picture, whatever
+    // the screen's; mpv's own scaler takes it from there to the window (down
+    // from a larger one: supersampling). 0 = screen: the picture's place in
+    // the window.
+    int scale_to = 0;
+    // low_latency: NVIDIA Reflex's low latency mode in mpv (the frame
+    // generation add-on asks the driver for it): 0 off, 1 on, 2 on with boost
+    // (the GPU kept at full clock speed). Nothing on another GPU.
+    int low_latency = 0;
     // [frames]
     bool dedup = true;
     int dedup_threshold = 3;
@@ -46,7 +58,9 @@ struct Settings {
     // between (an RTX 40 or 50, once it is downloaded); Glasir's own where it
     // cannot run.
     bool framegen_nvidia = false;
-    int nvidia_quality = 1;           // nvidia_quality: 0 low, 1 medium, 2 high (its model's size)
+    // nvidia_quality: 0 low, 1 medium, 2 high (its model's size), 3 auto (the
+    // largest that keeps up, chosen again as the load changes).
+    int nvidia_quality = 1;
     int framegen_multiplier = 2;      // multiplier: 2, 3 or 4 frames shown for each of the game's
     bool all_frames_when_off = true;  // frame generation off: every frame (lowest latency)
     // [dlss5]
@@ -77,8 +91,16 @@ struct Settings {
 // are logged and skipped. False with a message for a value that makes no sense.
 bool load_settings(const std::wstring &path, Settings &s, std::wstring &error);
 
-// "mpv", "fsr", "vsr", "cnn", "anime4k": glasir.ini's and glasir_scaling.lua's names.
+// "mpv", "fsr", "vsr", "cnn", "anime4k", "nvidia": glasir.ini's and glasir_scaling.lua's names.
 const wchar_t *scaling_name(Settings::Scaling scaling);
+// "low", "medium", "high", "auto": glasir.ini's framegen.nvidia_quality and the add-on's VfgQuality.
+const wchar_t *nvidia_quality_name(int quality);
+// "low", "medium", "high", "ultra": glasir.ini's video.scaling_quality and the add-on's SrQuality.
+const wchar_t *scaling_quality_name(int quality);
+// "screen" or the lines: glasir.ini's video.scale_to.
+std::wstring scale_to_name(int scale_to);
+// "off", "on", "boost": glasir.ini's video.low_latency and the add-on's LowLatency.
+const wchar_t *low_latency_name(int low_latency);
 
 // One setting, as "section.key=value" (the command line's --set).
 bool apply_override(Settings &s, const std::wstring &assignment, std::wstring &error);

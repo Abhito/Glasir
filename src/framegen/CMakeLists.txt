@@ -52,6 +52,11 @@ glasir_component(fg_eval)
 target_link_libraries(fg_eval PRIVATE glasir_framegen_interp d3d11 dxgi windowscodecs ole32)
 target_compile_definitions(fg_eval PRIVATE _CRT_SECURE_NO_WARNINGS)  # getenv for its test switches
 
+# NVIDIA's Video Super Resolution through fg_sr.h, offline (eval/sr_eval.cpp, driven by eval/sr_eval.py).
+add_executable(sr_eval eval/sr_eval.cpp)
+glasir_component(sr_eval)
+target_link_libraries(sr_eval PRIVATE glasir_framegen_interp d3d11 dxgi)
+
 # What a second GPU would cost and give (eval/gpu_bench.cpp).
 add_executable(gpu_bench eval/gpu_bench.cpp)
 glasir_component(gpu_bench)
