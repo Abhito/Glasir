@@ -107,6 +107,8 @@ struct Choice {
     Settings::Scaling scaling = Settings::Scaling::Mpv;
     int scaling_quality = 1;  // scaling = nvidia: its model, 0 low .. 3 ultra
     int scale_to = 0;         // the height the scaler makes the picture; 0: its place on the screen
+    int sharpen = 0;          // FSR 1's sharpening pass on the picture as shown: 0 off, 1 low, 2 medium, 3 high
+    int supersample_lines = 0;  // the size Supersample last had in this window (not saved): for switching it on again
     int low_latency = 0;      // NVIDIA Reflex's low latency mode: 0 off, 1 on, 2 on with boost
     UINT32 shown_height = 0;  // the mode the window shows (automatic resolved), for the scaling note
 };
@@ -370,6 +372,18 @@ bool scaling_row(Choice &c, const Found *f, bool sr_installed) {
         {Settings::Scaling::Cnn, "ArtCNN (neural, the most detail)"},
         {Settings::Scaling::Anime4k, "Anime4K (cel-shaded and drawn styles)"},
     };
+    // Apart from the scaling: FSR 1's sharpening pass on the picture as it is shown.
+    const int sharpen = ui::choice(
+        "Sharpen", {"Off", "Low", "Medium", "High"}, c.sharpen, column(),
+        "Sharpens the picture as it is shown, whatever its size, for next to no GPU time. DLSS 5 keeps most of "
+        "it.\nHigh also brings up a game's grain. FSR 1 has sharpening of its own: this adds to it. With NVIDIA "
+        "Super Resolution it sharpens the capture, before NVIDIA's model scales it.");
+    if (sharpen >= 0) c.sharpen = sharpen;
+    // What the scaling has to do as things are: the capture against its place on this screen (16:9), and
+    // the size Supersample names.
+    const int screen_w = GetSystemMetrics(SM_CXSCREEN), screen_h = GetSystemMetrics(SM_CYSCREEN);
+    const int place_h = std::min(screen_h, screen_w * 9 / 16);  // a 16:9 picture's place on this screen
+    const int capture_h = int(c.shown_height);                  // 0: not known
     row("Scaling");
     const char *current = options[0].label;
     for (const Option &o : options)
@@ -389,6 +403,13 @@ bool scaling_row(Choice &c, const Found *f, bool sr_installed) {
                 "and frame generation also need.\nNVIDIA Super Resolution (an RTX GPU) is NVIDIA's again, run by "
                 "Glasir itself: with its models for clean pictures such as a console's, a choice among them, and "
                 "G-SYNC.");
+    // Nothing for it to scale up: say so, or the choice looks as if it did something.
+    if (capture_h && capture_h >= place_h && !(c.scale_to > capture_h && c.scaling != Settings::Scaling::Mpv))
+        dim(capture_h > place_h ? "Not used now: the capture is larger than the screen, and is scaled down to it."
+                                : "Not used now: the capture already fills the screen.");
+    else if (capture_h && capture_h < place_h && c.scale_to && c.scale_to <= capture_h &&
+             c.scaling != Settings::Scaling::Mpv)
+        dim("Not used now: the capture is as large as Supersample's size, so mpv's own scaler takes it to the screen.");
     // NVIDIA's has quality levels, and they are the driver's: a program can
     // only ask for the super resolution, not say how strong (mpv's filter,
     // like every program's, passes "on"). So: where to set it.
@@ -411,29 +432,41 @@ bool scaling_row(Choice &c, const Found *f, bool sr_installed) {
             ImGui::PushID("scaling");
             if (ImGui::Button("Download it")) download = true;
             ImGui::PopID();
+        } else if (capture_h > place_h && c.scale_to > capture_h) {
+            // The add-on only gets the picture at the screen's size: FSR 1 makes Supersample's size in mpv.
+            dim("Not used now: the capture is larger than the screen, so FSR 1 makes Supersample's size.");
         }
     }
-    // The size it scales to: the picture's place on the screen, or a size of
-    // its own, from which mpv's scaler goes to the screen (Glasir's add-on,
-    // for NVIDIA Super Resolution).
-    static constexpr int kLines[] = {0, 1440, 2160, 2880};
-    int at = -1;  // a height from glasir.ini that is none of these: none is lit
-    for (int i = 0; i < 4; ++i)
-        if (kLines[i] == c.scale_to) at = i;
-    const int to = ui::choice(
-        "Scale to", {"Screen", "1440p", "4K", "5K"}, at, column(),
-        "The size the picture is scaled up to. Screen: its place on the screen.\nA size larger than the screen (4K on "
-        "a 1440p screen) is scaled down to the screen afterwards: smoother edges and finer detail, for more GPU "
-        "time.\nA smaller one leaves the rest of the way up to a plain scaler, for less GPU time.");
-    if (to >= 0) c.scale_to = kLines[to];
-    // A capture as tall as what it is scaled to is not scaled at all.
-    const int screen_w = GetSystemMetrics(SM_CXSCREEN), screen_h = GetSystemMetrics(SM_CYSCREEN);
-    const UINT32 place_h = c.scale_to ? UINT32(c.scale_to) : UINT32(std::min(screen_h, screen_w * 9 / 16));
-    if (c.scale_to && c.scaling == Settings::Scaling::Mpv)
-        dim("mpv's own scaling goes straight to the screen: pick another Scaling to scale to this size.");
-    else if (c.shown_height && c.shown_height >= place_h)
-        dim(c.scale_to ? "Not used: the capture is as large as this size."
-                       : "Not used: the capture is as large as its place on the screen.");
+    // Supersample (glasir.ini video.scale_to): the scaling makes a size of its
+    // own, from which mpv's scaler goes to the screen (Glasir's add-on, for
+    // NVIDIA Super Resolution) - down from a larger one. One switch to have
+    // it or not; its size only while it is on.
+    static constexpr int kLines[] = {1440, 2160, 4320};
+    if (c.scale_to) c.supersample_lines = c.scale_to;
+    bool supersample = c.scale_to > 0;
+    if (ui::toggle("Supersample", &supersample,
+                   "Has the scaling make a size of its own first (Scale to), from which the picture goes to the "
+                   "screen: larger than the screen, it is scaled down to it, for smoother edges and more GPU time. "
+                   "Off: the picture is scaled to the screen and no further.")) {
+        // The size it had before, or the first one taller than the screen and the capture.
+        int lines = c.supersample_lines;
+        for (int i = 0; lines <= 0 && i < 3; ++i)
+            if (kLines[i] > std::max(screen_h, capture_h) || i == 2) lines = kLines[i];
+        c.scale_to = supersample ? lines : 0;
+    }
+    if (c.scale_to) {
+        int at = -1;  // a height from glasir.ini that is none of these: none is lit
+        for (int i = 0; i < 3; ++i)
+            if (kLines[i] == c.scale_to) at = i;
+        const int to = ui::choice("Scale to", {"1440p", "4K", "8K"}, at, column(),
+                                  "The size the picture is scaled up to before it goes to the screen. A scaling makes "
+                                  "it at most four times larger.");
+        if (to >= 0) c.scale_to = kLines[to];
+        if (c.scaling == Settings::Scaling::Mpv)
+            dim("Not used now: mpv's own scaling goes straight to the screen. Pick another Scaling.");
+        else if (capture_h && capture_h >= c.scale_to)
+            dim("Not used now: the capture is as large as this size.");
+    }
     return download;
 }
 
@@ -677,13 +710,30 @@ void draw(Screen &s) {
         }
     }
 
-    // What is set once: scaling, the sound, the window, the downloads, a bug report.
+    // What is set once, each group under its name: sharpness and scaling, how the picture is shown,
+    // the sound; then the downloads and a bug report.
     if (ui::disclosure("More options", &s.more)) {
         ui::begin_card("more");
+        ui::section("SHARPNESS AND SCALING");
         if (scaling_row(c, f, s.sr_installed)) {
             s.action = LauncherAction::SetupVfg;  // one package: frame generation and super resolution
             s.finished = true;
         }
+        ui::divider();
+        ui::section("DISPLAY");
+        const int shown = ui::choice("Show as", {"Full screen", "Borderless", "Window"}, c.fullscreen ? 0 : c.borderless ? 1 : 2,
+                                     column(),
+                                     "Full screen: mpv's own, as f or a double-click switches it.\nBorderless: a window "
+                                     "without a frame that fills the screen.");
+        if (shown == 0) c.borderless = c.fullscreen = true;
+        else if (shown == 1) c.borderless = true, c.fullscreen = false;
+        else if (shown == 2) c.borderless = c.fullscreen = false;
+        if (c.borderless && !c.fullscreen)
+            ui::toggle("Skip the black bars", &c.skip_bars,
+                       "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
+                       "generation work on the picture only, a lighter load. On some PCs Windows then composes the "
+                       "window: G-SYNC cannot follow it and frame generation falls short of double. The menu (Tab) "
+                       "says when.");
         // NVIDIA RTX Video HDR, in the GPU's video processor (as its super resolution).
         if (!c.hdr_auto && c.hdr && f && std::wstring(vsr_kind(f->gpu)) == L"nvidia")
             ui::toggle("RTX HDR for SDR", &c.rtx_hdr,
@@ -701,6 +751,7 @@ void draw(Screen &s) {
             if (latency >= 0) c.low_latency = latency;
         }
         ui::divider();
+        ui::section("SOUND");
         ui::toggle("Play the card's sound", &c.audio);
         if (c.audio && f) {
             row("Input");
@@ -718,19 +769,6 @@ void draw(Screen &s) {
             }
         }
         ui::divider();
-        const int shown = ui::choice("Show as", {"Full screen", "Borderless", "Window"}, c.fullscreen ? 0 : c.borderless ? 1 : 2,
-                                     column(),
-                                     "Full screen: mpv's own, as f or a double-click switches it.\nBorderless: a window "
-                                     "without a frame that fills the screen.");
-        if (shown == 0) c.borderless = c.fullscreen = true;
-        else if (shown == 1) c.borderless = true, c.fullscreen = false;
-        else if (shown == 2) c.borderless = c.fullscreen = false;
-        if (c.borderless && !c.fullscreen)
-            ui::toggle("Skip the black bars", &c.skip_bars,
-                       "For a picture of another shape than the screen (16:9 on an ultrawide): DLSS 5 and frame "
-                       "generation work on the picture only, a lighter load. On some PCs Windows then composes the "
-                       "window: G-SYNC cannot follow it and frame generation falls short of double. The menu (Tab) "
-                       "says when.");
         ui::toggle("Open this window when Glasir starts", &c.show);
         if (!c.show) dim("Glasir then plays at once. Hold Shift while starting it to see this window.");
         ui::end_card();
@@ -795,6 +833,7 @@ void save(const std::wstring &path, const Choice &c, const Choice &o, bool nr_gp
     if (c.scaling_quality != o.scaling_quality)
         v.push_back({L"video", L"scaling_quality", scaling_quality_name(c.scaling_quality)});
     if (c.scale_to != o.scale_to) v.push_back({L"video", L"scale_to", scale_to_name(c.scale_to)});
+    if (c.sharpen != o.sharpen) v.push_back({L"video", L"sharpen", sharpen_name(c.sharpen)});
     if (c.low_latency != o.low_latency) v.push_back({L"video", L"low_latency", low_latency_name(c.low_latency)});
     if (v.empty()) return;
     save_settings(path, v);
@@ -843,6 +882,7 @@ Choice from(const Settings &s) {
     c.scaling = s.scaling;
     c.scaling_quality = s.scaling_quality;
     c.scale_to = s.scale_to;
+    c.sharpen = s.sharpen;
     c.low_latency = s.low_latency;
     return c;
 }

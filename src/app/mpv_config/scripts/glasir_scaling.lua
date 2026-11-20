@@ -35,7 +35,8 @@
 -- "Scale to" (target: a height in lines, 0 = the picture's place on the
 -- screen) makes the picture that tall whatever the window's size, and mpv's
 -- own scaler takes it from there to the window: down when the target is
--- larger than the screen (4K on a 1440p screen: supersampling), up when it is
+-- larger than the screen (4K on a 1440p screen: supersampling; with Lanczos,
+-- dscale in mpv.conf, as mpv's own default softens it), up when it is
 -- smaller. The shaders size their output by the window (OUTPUT in their
 -- //!WHEN, //!WIDTH and //!HEIGHT lines), and mpv gives them no other size to
 -- go by: for a target, each is written out again with the target's numbers
@@ -58,10 +59,21 @@
 -- from now on (Glasir, when the console's signal or the menu's choice
 -- changes). user-data/glasir/scaling says the mode, user-data/glasir/target
 -- the size to scale to, user-data/glasir/rtx-hdr whether RTX Video HDR runs
--- (on, off or unavailable).
+-- (on, off or unavailable), user-data/glasir/scaled what is in place now: the
+-- size the picture is made and by which mode ("3840x2160 fsr": FSR 1 also
+-- where it stands in for another), or nothing where mpv's own scaler or the
+-- add-on does it, or the picture is not made larger.
+--
+-- "Sharpen" (sharpen: 0 off, 1 low, 2 medium, 3 high; "script-message
+-- glasir-sharpen <n>" while playing, user-data/glasir/sharpen says it) is
+-- apart from the scaling: FSR 1's sharpening pass alone
+-- (shaders/glasir_rcas.glsl) on the picture mpv has finished, at the size it
+-- is shown - after mpv's scaler and the shaders above, or on a picture
+-- nothing scaled. With mode = nvidia the add-on scales after mpv, so there it
+-- is the small picture that is sharpened, before NVIDIA's model.
 local mp = require 'mp'
 local utils = require 'mp.utils'
-local opts = { mode = 'mpv', vsr = 'nvidia', hdr = false, hdr_peak = 1000, rtx_hdr = false, target = 0 }
+local opts = { mode = 'mpv', vsr = 'nvidia', hdr = false, hdr_peak = 1000, rtx_hdr = false, target = 0, sharpen = 0 }
 local options_changed  -- set below
 require('mp.options').read_options(opts, 'glasir_scaling', function() options_changed() end)
 
@@ -149,31 +161,39 @@ end
 
 -- The scale that makes the capture fill its place - or, with a target, as
 -- tall as the target - or nil when it already is (or the sizes are not known
--- yet). With a target also the size that makes: { w, h }.
+-- yet). With a target also the size that makes: { w, h }. Third, for what
+-- is said of it (user-data/glasir/scaled): the capture's size and, without a
+-- target, its place in the window: { w, h, place = { w, h } }.
+local MAX_SIDE = 16384  -- the widest picture Direct3D 11 holds: no target is made wider (the add-on counts the same)
 local function wanted_scale()
     local w = mp.get_property_number('video-params/w')
     local h = mp.get_property_number('video-params/h')
     if not w or not h or w < 16 or h < 16 then return nil end
     local fixed = target > 0 and not target_failed
-    local fit
+    local fit, place
     if fixed then
-        fit = math.min(target / h, 4)
+        fit = math.min(target / h, 4, MAX_SIDE / w)
     else
         local dims = mp.get_property_native('osd-dimensions')
         if not dims then return nil end
         local ow = dims.w - (dims.ml or 0) - (dims.mr or 0)
         local oh = dims.h - (dims.mt or 0) - (dims.mb or 0)
+        if ow < 16 or oh < 16 then return nil end
+        place = { w = ow, h = oh }
         -- Drawn as large as it comes, the margins are around the small
         -- picture: its place is what fits the window.
-        if mode == 'nvidia' then ow, oh = dims.w, dims.h end
-        if ow < 16 or oh < 16 then return nil end
+        if mode == 'nvidia' then
+            ow, oh = dims.w, dims.h
+            local whole = math.min(ow / w, oh / h)
+            place = { w = math.floor(w * whole + 0.5), h = math.floor(h * whole + 0.5) }
+        end
         fit = math.min(ow / w, oh / h, 4)
     end
     if fit <= 1.001 then return nil end
     -- Even output sizes, which the video processor wants.
     local out_h = math.floor(h * fit / 2) * 2
     local scale = out_h / h
-    return scale, fixed and { w = math.floor(w * scale / 2 + 0.5) * 2, h = out_h } or nil
+    return scale, fixed and { w = math.floor(w * scale / 2 + 0.5) * 2, h = out_h } or nil, { w = w, h = h, place = place }
 end
 
 -- G-SYNC and NVIDIA's super resolution. The NVIDIA driver does not run
@@ -325,7 +345,7 @@ end
 -- Puts the chosen mode in place for the current sizes and frames.
 local function apply()
     pending = nil
-    local scale, size = wanted_scale()
+    local scale, size, capture = wanted_scale()
     -- The add-on scales (mode = nvidia, and it has said that it can): mpv
     -- only draws the picture as it comes - which it can only where the whole
     -- of it fits the window (a larger one it would cut off).
@@ -370,10 +390,14 @@ local function apply()
     end
     say_rtx_hdr()
     local want = {}
+    local by = nil  -- what makes the picture larger here (a mode's name); nil: nothing, or the add-on
     if scale ~= nil and not own then
         want = SHADERS[mode] or {}
-        if mode == 'vsr' and vsr_failed then want = SHADERS.fsr end
-        if mode == 'nvidia' then want = SHADERS.fsr end  -- until the add-on is ready, and where it cannot be
+        by = SHADERS[mode] and mode or nil
+        if mode == 'vsr' then
+            if vsr_failed then want, by = SHADERS.fsr, 'fsr' else by = processor and processor.scale and 'vsr' or nil end
+        end
+        if mode == 'nvidia' then want, by = SHADERS.fsr, 'fsr' end  -- until the add-on is ready, and where it cannot be
     end
     if size ~= nil then
         -- For a target: each shader's copy with the target's size in it.
@@ -393,7 +417,59 @@ local function apply()
     set_shaders(want)
     mp.set_property('user-data/glasir/scaling', mode)
     mp.set_property('user-data/glasir/target', tostring(target))
+    -- For the menu's top line: the size the picture is made, and by what.
+    -- With a target, that size. By the window, the picture's place: FSR 1
+    -- and Anime4K end there whatever the scale (OUTPUT), ArtCNN makes twice the
+    -- capture and FSR 1 or mpv's scaler takes that to the place; the video
+    -- processor makes what its scale gives (four times at most; mpv's scaler
+    -- does the rest). It is what was asked of the mode: its shaders still
+    -- choose by the scale which of their passes run (ArtCNN from 1.3x, Anime4K
+    -- from 1.2x and by whole doublings).
+    local made = ''
+    if by then
+        local to = size
+        if not to and by == 'vsr' then
+            to = { w = math.floor(capture.w * scale + 0.5), h = math.floor(capture.h * scale + 0.5) }
+        end
+        to = to or capture.place
+        made = string.format('%dx%d %s', to.w, to.h, by)
+    end
+    mp.set_property('user-data/glasir/scaled', made)
 end
+
+-- Sharpen: RCAS on mpv's finished picture. Its strength in the shader is in
+-- stops under RCAS's most, each one halving it: a quarter, a half and 71 % of
+-- it (measured on a console's 1440p HDR picture, 2026-11-20: the finest
+-- detail's energy x1.2, x1.7 and x2.4; all of it, x5.8, is mostly grain).
+local RCAS = '~~/shaders/glasir_rcas.glsl'
+local SHARPEN_STOPS = { 2.0, 1.0, 0.5 }
+local SHARPEN_NAMES = { [0] = 'Off', 'Low', 'Medium', 'High' }
+local function sharpen_level(n)
+    n = math.floor(tonumber(n) or 0)
+    return (n >= 0 and n <= 3) and n or 0
+end
+local sharpen = sharpen_level(opts.sharpen)
+local sharpening = false  -- the shader is in mpv's list
+
+local function apply_sharpen()
+    if sharpen > 0 then
+        -- The shader's parameter, beside whatever else is set there.
+        local set = mp.get_property_native('glsl-shader-opts') or {}
+        set.glasir_sharpen = string.format('%.2f', SHARPEN_STOPS[sharpen])
+        mp.set_property_native('glsl-shader-opts', set)
+    end
+    if (sharpen > 0) ~= sharpening then
+        sharpening = sharpen > 0
+        mp.commandv('change-list', 'glsl-shaders', sharpening and 'append' or 'remove', RCAS)
+    end
+    mp.set_property('user-data/glasir/sharpen', tostring(sharpen))
+end
+
+mp.register_script_message('glasir-sharpen', function(n)
+    sharpen = sharpen_level(n)
+    apply_sharpen()
+    toast('Sharpen: ' .. SHARPEN_NAMES[sharpen])
+end)
 
 -- Sizes settle over a few events (the window opening, full screen): once.
 local function soon()
@@ -451,16 +527,17 @@ mp.register_script_message('glasir-sr', function(state)
     end
 end)
 
--- The size to scale to (the in-game menu): a height in lines, 0 for the
--- picture's place on the screen.
+-- The size to scale to (the in-game menu's Supersample switch, and "Scale
+-- to" under it): a height in lines, 0 for the picture's place on the screen,
+-- which is the switch off.
 local TARGETS = { [1440] = '1440p', [2160] = '4K', [2880] = '5K', [4320] = '8K' }
 mp.register_script_message('glasir-target', function(n)
     target = lines(n)
     target_failed = false
     apply()
-    local name = target == 0 and 'the screen' or TARGETS[target] or (target .. ' lines')
+    local name = target == 0 and 'off' or TARGETS[target] or (target .. ' lines')
     if target_failed then return end  -- said by apply()
-    toast('Scale to: ' .. name .. (target > 0 and mode == 'mpv' and " (not used by mpv's own scaling)" or ''))
+    toast('Supersample: ' .. name .. (target > 0 and mode == 'mpv' and " (not used by mpv's own scaling)" or ''))
 end)
 
 -- What the frames are from now on (Glasir: the console went from SDR to HDR
@@ -493,6 +570,8 @@ mp.observe_property('video-params', 'native', function() soon() end)
 mp.set_property('user-data/glasir/scaling', mode)
 mp.set_property('user-data/glasir/target', tostring(target))
 mp.set_property('user-data/glasir/sr', 'off')
+mp.set_property('user-data/glasir/scaled', '')
+apply_sharpen()
 say_rtx_hdr()
 if mode == 'vsr' and vsr_failed then
     mp.msg.warn('this GPU has no video super resolution; FSR 1 instead')

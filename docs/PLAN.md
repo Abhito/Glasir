@@ -72,8 +72,8 @@ Keep / build:
   shaders. Temporal upscalers (DLSS SR, FSR 2/3, XeSS) are left out: a
   capture has no camera jitter, depth or engine motion vectors, so they
   would add ghosting and no detail)* *(2026-11-19: "Scale to", `[video]
-  scale_to`: the scaler's output is a size of its own, 1440p, 4K or 5K
-  whatever the screen's, and mpv's scaler goes from there to the window:
+  scale_to`: the scaler's output is a size of its own, 1440p, 4K or 8K
+  (5K until 2026-11-20) whatever the screen's, and mpv's scaler goes from there to the window:
   down from a larger one (supersampling). In mpv, before DLSS 5 and frame
   generation, which still work at the window's size: a picture larger than
   the window after them would need a renderer of our own. Tested with a
@@ -86,6 +86,15 @@ Keep / build:
   download as NVIDIA Video Frame Generation. Tested with a test pattern,
   SDR and HDR; not yet with a card. "Scale to" works with it: the effect
   makes that size and a pass of the add-on's takes it to the window)*
+  *(2026-11-20, measured on the owner's card with a 1440p and a 4K HDR
+  capture of one scene: scaling a picture up and back down adds no detail
+  the capture does not have, so "Scale to" is under a Supersample switch,
+  off by default; a 4K capture scaled down does show more, once the scaling
+  down is sharp, so mpv's `dscale` is Lanczos now and the add-on's own pass
+  Catmull-Rom; and `[video] sharpen = off | low | medium | high`, FSR 1's
+  RCAS alone on mpv's output (glasir_rcas.glsl), for a sharper picture at
+  any size. DLSS as an upscaler stays out: the DLSS 5 feeder already runs
+  it at 100 % with no jitter to gain from)*
 - NVIDIA Reflex's low latency mode on NVIDIA GPUs *(2026-11-19: `[video]
   low_latency = off | on | boost`, off by default; the frame generation
   add-on asks the driver, through its own nvapi64.dll. Measured with a test

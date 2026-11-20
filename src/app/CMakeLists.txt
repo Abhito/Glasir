@@ -34,7 +34,8 @@ install(FILES mpv_config/mpv.conf mpv_config/input.conf DESTINATION engine/porta
 install(FILES mpv_config/scripts/glasir_scaling.lua mpv_config/scripts/glasir_window.lua
               mpv_config/scripts/glasir_screenshot.lua
         DESTINATION engine/portable_config/scripts)
-install(FILES mpv_config/shaders/glasir_fsr1.glsl DESTINATION engine/portable_config/shaders)
+install(FILES mpv_config/shaders/glasir_fsr1.glsl mpv_config/shaders/glasir_rcas.glsl
+        DESTINATION engine/portable_config/shaders)
 # Third-party mpv shaders, unmodified (third_party/README.md): the cnn and
 # anime4k scaling modes.
 set(glasir_shaders "${PROJECT_SOURCE_DIR}/third_party")

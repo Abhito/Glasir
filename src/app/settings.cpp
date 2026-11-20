@@ -124,6 +124,13 @@ bool apply(Settings &s, const std::wstring &section, const std::wstring &key, co
             if (!parse_int(l, 480, 4320, n) || n % 2) return bad(L"screen, or a height in lines: 480 to 4320, even");
             s.scale_to = int(n);
         }
+    } else if (name == L"video.sharpen") {
+        const std::wstring l = lower(value);
+        if (l == L"off" || l == L"0") s.sharpen = 0;
+        else if (l == L"low") s.sharpen = 1;
+        else if (l == L"medium") s.sharpen = 2;
+        else if (l == L"high") s.sharpen = 3;
+        else return bad(L"off, low, medium or high");
     } else if (name == L"video.low_latency") {
         const std::wstring l = lower(value);
         if (l == L"off" || l == L"0") s.low_latency = 0;
@@ -240,6 +247,10 @@ const wchar_t *scaling_quality_name(int quality) {
 
 std::wstring scale_to_name(int scale_to) { return scale_to > 0 ? std::to_wstring(scale_to) : L"screen"; }
 
+const wchar_t *sharpen_name(int sharpen) {
+    return sharpen >= 3 ? L"high" : sharpen == 2 ? L"medium" : sharpen == 1 ? L"low" : L"off";
+}
+
 const wchar_t *low_latency_name(int low_latency) {
     return low_latency >= 2 ? L"boost" : low_latency == 1 ? L"on" : L"off";
 }
@@ -300,13 +311,22 @@ scaling = mpv
 ; higher one is a larger model and takes more GPU time, which DLSS 5 and
 ; frame generation also need. The menu (Tab) switches it while playing.
 scaling_quality = medium
-; The size the scaler makes the picture: screen (the picture's place on the
-; screen), or a height in lines whatever the screen's: 1440, 2160 (4K), 2880
-; (5K). Larger than the screen, the picture is scaled up to that size and
-; then down to the screen (supersampling): smoother edges and finer detail,
-; for more GPU time. Smaller, a plain scaler does the rest of the way up.
+; "Supersample" in the window and the menu. The size the scaler makes the
+; picture: screen (the picture's place on the screen: Supersample off), or a
+; height in lines whatever the screen's ("Scale to"): 1440, 2160 (4K), 4320
+; (8K). Larger than the screen, the picture is scaled up to that size (at
+; most four times the capture's) and then down to the screen
+; (supersampling): smoother edges and finer detail, for more GPU time.
+; Smaller, a plain scaler does the rest of the way up.
 ; Not used by scaling = mpv, which has one step only.
 scale_to = screen
+; Sharpens the picture as it is shown, whatever scaled it (or nothing did):
+; off, low, medium or high. It is FSR 1's sharpening pass, on any GPU, for
+; next to no GPU time; DLSS 5 keeps most of it. High also brings up a game's
+; grain. scaling = fsr sharpens by itself already (this adds to it); with
+; scaling = nvidia it sharpens the capture, before NVIDIA's model scales it. The menu (Tab) switches it
+; while playing.
+sharpen = off
 ; NVIDIA GPUs: NVIDIA Reflex's low latency mode for the picture. off, on, or
 ; boost (on, and the GPU is kept at full clock speed: more power, more heat).
 ; With frame generation on a GPU that has time to spare, frames reach the
@@ -387,7 +407,7 @@ mode = borderless
 ; takes the picture only, black around it, so DLSS 5 and frame generation skip
 ; the bars. Some PCs then compose the window (no overlay plane for it):
 ; G-SYNC cannot follow it and frame generation falls short of double. The
-; menu says when (its fps, and a line under the picture's More).
+; menu says when (its fps, and a line under the picture's Display).
 skip_black_bars = 0
 
 [launcher]

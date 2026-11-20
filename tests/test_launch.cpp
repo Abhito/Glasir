@@ -692,6 +692,13 @@ int main() {
                    !apply_override(s, L"video.scale_to=4k", error) && s.scale_to == 1440 &&
                    apply_override(s, L"video.scale_to=Screen", error) && s.scale_to == 0,
                "video.scale_to: the screen by default, or an even height in lines");
+        expect(s.sharpen == 0 && std::wstring(sharpen_name(s.sharpen)) == L"off" &&
+                   apply_override(s, L"video.sharpen=Medium", error) && s.sharpen == 2 &&
+                   std::wstring(sharpen_name(s.sharpen)) == L"medium" && apply_override(s, L"video.sharpen=high", error) &&
+                   s.sharpen == 3 && !apply_override(s, L"video.sharpen=ultra", error) && s.sharpen == 3 &&
+                   apply_override(s, L"video.sharpen=low", error) && std::wstring(sharpen_name(s.sharpen)) == L"low" &&
+                   apply_override(s, L"video.sharpen=off", error) && s.sharpen == 0,
+               "video.sharpen: off by default, low, medium, high");
         expect(s.low_latency == 0 && apply_override(s, L"video.low_latency=on", error) && s.low_latency == 1 &&
                    apply_override(s, L"video.low_latency=Boost", error) && s.low_latency == 2 &&
                    std::wstring(low_latency_name(s.low_latency)) == L"boost" &&
@@ -729,6 +736,7 @@ int main() {
             expect(found, "mpv scales to the picture's place on the screen unless told a size");
         }
         s.scale_to = 2160;
+        s.sharpen = 2;
         const auto args = mpv_arguments(plan, s);
         auto has = [&](const wchar_t *arg) {
             for (const auto &a : args)
@@ -736,6 +744,7 @@ int main() {
             return false;
         };
         expect(has(L"--script-opts-append=glasir_scaling-target=2160"), "mpv gets the size to scale to");
+        expect(has(L"--script-opts-append=glasir_scaling-sharpen=2"), "mpv gets how much to sharpen");
         expect(has(L"--script-opts-append=glasir_scaling-mode=vsr") &&
                    has(L"--script-opts-append=glasir_scaling-hdr=yes") &&
                    has(L"--script-opts-append=glasir_scaling-hdr_peak=800") &&

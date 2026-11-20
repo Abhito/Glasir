@@ -62,8 +62,10 @@
   `Selected=0x1BEC192E` in ReShade.ini's `[OVERLAY] Docking` is Add-ons.
   `GLASIR_FRAMEGEN_CAPTURE_AFTER=<s>` makes the add-on save frames to
   `out\Glasir\Captures` (16-bit PQ for HDR: tone-map before viewing).
-- "Scale to" (`[video] scale_to`: screen, or a height in lines; launcher and
-  menu): glasir_scaling.lua scales to that size and mpv's own scaler goes
+- "Scale to" (`[video] scale_to`: screen, or a height in lines; in the
+  launcher and the menu a "Supersample" switch, off = screen, with "Scale
+  to" 1440p / 4K / 8K under it while on: the owner wanted it easy to turn
+  off, 2026-11-20): glasir_scaling.lua scales to that size and mpv's own scaler goes
   from there to the window (down from a larger one: supersampling). mpv's
   shaders can only size their output by the window (`OUTPUT`), so for a
   target the script writes a copy of each with the numbers in its `//!` lines
@@ -73,6 +75,18 @@
   generation still work at the window's size. Test with
   `python tools/scaling_check.py --target 2160 --size 1920x1080 --window
   2560x1440 [--format p010 --hdr]`.
+- "Sharpen" (`[video] sharpen = off | low | medium | high`, off by default;
+  launcher and menu): FSR 1's RCAS alone on mpv's output
+  (`shaders\glasir_rcas.glsl`, the `OUTPUT` hook), put in mpv's list by
+  glasir_scaling.lua with its strength (`glsl-shader-opts`
+  `glasir_sharpen`, in stops under RCAS's most; `script-message
+  glasir-sharpen <0-3>`). It runs before DLSS 5, which keeps most of it;
+  with `scaling = nvidia` it sharpens the small picture before NVIDIA's
+  model. mpv scales down with Lanczos (`dscale` in mpv.conf): its default,
+  Hermite, made a 4K capture softer than a 1440p one. Both were measured
+  on the card on 2026-11-20 (a capture larger than the screen is the only
+  way to more real detail; up and back down adds none);
+  `tools/scaling_check.py` checks both at the end of every run.
 - NVIDIA Reflex (`[video] low_latency = off | on | boost`, off by default;
   `LowLatency` in the add-on, `src/common/nv_low_latency.h`, its section in
   src/framegen/README.md with what was measured): the calls are found in the
@@ -95,7 +109,7 @@
   add-ons anew while ours stays loaded, and everything of ours made on the
   device must be let go with the swap chain (`on_destroy_swapchain`: by
   `destroy_device` the add-on no longer knows the device as mpv's).
-  To see whether G-SYNC runs: the menu's top line, "G-SYNC on/off for mpv's
+  To see whether G-SYNC runs: the menu's second line, "G-SYNC on/off for mpv's
   window" in ReShade.log, or PresentMon (sync interval 0 and tearing
   allowed). It needs mpv's window in front and covering the screen, so the
   test takes the owner's screen for half a minute: keep such runs few, and
@@ -167,14 +181,24 @@
   options"; redesigned 2026-11-17 because the owner found them dated and
   cluttered). Keep them short: what is changed for a session is in sight
   (card, mode, SDR/HDR, DLSS 5, frame generation, volume), what is set once
-  goes behind "More options" in the launcher and behind each card's own
-  "More" in the menu (boost and audio delay with the sound, scaling and the
-  window with the picture), an explanation goes into a tooltip
+  goes behind "More options" in the launcher and behind named groups in the
+  menu's cards (the picture's "Sharpness and scaling" and "Display", the
+  sound's "More"; the launcher's card has the same groups under small
+  headings), an explanation goes into a tooltip
   (`ui::tooltip`, also shown for the keyboard's item), and a note stays on
-  screen only where it says something to do. A new setting gets one of the
-  controls there, not a row of radio buttons or a paragraph. Before posting
+  screen only where it says something to do - or that the setting above it
+  does nothing as things are ("Not used now: ...": the owner could not tell
+  what was active, 2026-11-20). The menu's two top lines say what happens
+  to the picture: its way to the screen in order (sizes, what scales it,
+  Sharpen), then SDR or HDR, the rate and G-SYNC. A new setting gets one of
+  the controls there, not a row of radio buttons or a paragraph, and a
+  place in those lines if it changes the picture. Before posting
   Space or Enter in a test, capture the window and look where the keyboard's
-  ring is: on the launcher's Play it starts playing from the card.
+  ring is: on the launcher's Play it starts playing from the card. The menu
+  and the launcher save what is switched to out\Glasir\glasir.ini, which
+  is the owner's: copy it just before such a test and put that copy back
+  right after, never an older one (the owner may have changed settings
+  since: an older copy undid three of them on 2026-11-20).
 - mpv's window (`src/app/backdrop.cpp`, Glasir's own thread): borderless
   full screen covers the whole monitor, black bars included, by default.
   `[window] skip_black_bars = 1` (launcher: "Skip the black bars") sizes

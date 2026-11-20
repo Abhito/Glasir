@@ -260,6 +260,25 @@ the menu (it switches at once):
 A capture mode of the screen's height (2560x1440 on a 1440p screen) needs no
 scaling at all.
 
+A capture larger than the screen is scaled down to it, and that is the one
+way to a picture with more real detail than the screen's own size gives:
+thin lines that a 1440p capture breaks up come out whole. Where your card
+has a 4K mode at the game's frame rate (many have 4K HDR at 30 fps only,
+which suits a 30 fps game), set the console to 4K and pick that mode.
+Glasir scales down with Lanczos, which keeps that detail; very hard edges
+(small HUD text on black) can show a faint fringe from it.
+
+**Sharpen** (above Scaling; `[video] sharpen`): Off (the default), Low,
+Medium or High. It sharpens the picture as it is shown, whatever scaled it
+or nothing did, on any GPU and for next to no GPU time; DLSS 5 keeps most
+of it. It is FSR 1's sharpening pass: with FSR 1 as the scaling, which has
+that pass already, it adds to it. With NVIDIA Super Resolution it sharpens
+the capture, before NVIDIA's model scales it. High also brings up a game's
+grain.
+
+In the menu these are under the picture's "Sharpness and scaling"; the
+window, SDR or HDR and NVIDIA Reflex are under "Display".
+
 NVIDIA's video super resolution has quality levels, 1 to 4 and Auto. They
 are the driver's setting, the same for every program, and Glasir cannot set
 them: choose the level in the NVIDIA app (System, Video, Super resolution)
@@ -288,21 +307,29 @@ place of the driver's. What that changes:
 - **It is a download of NVIDIA's**, the same one as NVIDIA Video Frame
   Generation: Glasir's window offers it ("Download it") and shows NVIDIA's
   licences first. Until it is there, FSR 1 scales.
-- **Scale to** (below) works with it as with the other scalings: NVIDIA's
-  model makes the picture that size, and Glasir takes it to the screen from
-  there. It makes the picture up to four times larger.
+- **Supersample** (below) works with it as with the other scalings:
+  NVIDIA's model makes the picture that size, and Glasir takes it to the
+  screen from there. It makes the picture up to four times larger.
 - It needs an NVIDIA RTX GPU and ReShade (it is Glasir's add-on in mpv that
   runs it), and works in SDR and HDR.
 
-**Scale to** (beside Scaling; `[video] scale_to`) is the size the picture is
-scaled up to:
+**Supersample** (under Scaling; `[video] scale_to`) is a switch, off by
+default: the picture is scaled to its place on your screen and no further.
+Switched on, the scaling makes a size of its own first, picked beside it
+under **Scale to**:
 
-- **Screen** (the default): the picture's place on your screen.
-- **1440p, 4K or 5K**, whatever your screen's size. Larger than the screen
+- **1440p, 4K or 8K**, whatever your screen's size. Larger than the screen
   (4K on a 1440p screen), the picture is scaled up to that size and then
-  down to the screen, which smooths edges and keeps finer detail
-  (supersampling), for more GPU time. Smaller than the screen, a plain
-  scaler does the rest of the way up, for less GPU time.
+  down to the screen, which smooths edges, for more GPU time. Smaller than
+  the screen, a plain scaler does the rest of the way up, for less GPU
+  time. No scaling makes the picture more than four times larger: 8K is
+  reached from a 1080p capture or a larger one, and costs a great deal of
+  GPU time.
+
+Glasir's window and the menu say "Not used" under it where it does nothing:
+with mpv's own scaling, and where the capture is already as large as the
+size picked. It adds no detail the capture does not have: for that, capture
+larger than the screen (above).
 
 It makes the most difference with FSR 1 (cleaner edges, less ringing around
 text), a little with VSR, and next to none with ArtCNN and Anime4K, which
@@ -311,7 +338,9 @@ NVIDIA's model makes the larger size, and Glasir takes it down to the
 screen. mpv's own scaling goes to the screen in one step and does not use
 it. DLSS 5 and frame generation work on the picture at
 the screen's size either way. `glasir.ini` also takes any other even height
-from 480 to 4320 lines.
+from 480 to 4320 lines (`screen` is the switch off). The menu's top line
+says the picture's way to the screen in order, e.g. `2560x1440 → 3840x2160
+(NVIDIA SR) → 2560x1440 · Sharpen Medium`.
 
 ### NVIDIA Video Frame Generation's quality
 
@@ -339,7 +368,7 @@ again while you play when the load changes, e.g. a 30 fps game after a
 ### NVIDIA Reflex
 
 On an NVIDIA GPU, **NVIDIA Reflex** (under "More options"; "Reflex" under
-the picture's More in the menu; `[video] low_latency`) asks the driver for
+the picture's Display in the menu; `[video] low_latency`) asks the driver for
 its low latency mode: Off (the default), On, or Boost (On, with the GPU kept
 at full clock speed: more power and heat).
 
